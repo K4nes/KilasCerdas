@@ -1,79 +1,94 @@
 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800;900&display=swap');
-
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
 /* ================================================================
-   KILAS CERDAS — Pastel Design System (locked by spec)
-   Source: docs/superpowers/specs/2026-05-20-kilascerdas-design.md
-   Vibe: "warm pastel, pink-violet aksen, rounded, sticker-like"
-   Genre: playful · Macrostructure family: Marquee Hero / Workbench /
-   Game state-machine
+   BRAINCLASH — InsightPod Color System (color-only redesign)
+   Original: KILAS CERDAS pastel (pink-violet, locked by spec)
+   Source for redesign: docs/design/insightpod.md (warm-anchored cluster)
+   Vibe: "warm cream paper, orange-burgundy accent, rounded, playful"
+   Genre: playful · Color route: studied-DNA (Dribbble image, AA-tuned v2)
+   ----------------------------------------------------------------
+   NOTE: token NAMES preserved for backwards-compat with component classes.
+   Names like "accent-pink", "card-blue", "card-purple" are historical labels
+   — the values are now warm-anchored.
    ================================================================ */
 
-:root {
-  /* ── Paper (background surfaces) ── */
-  --color-paper:        oklch(98%   0.012  315);   /* #faf5ff – warm white */
-  --color-paper-2:      oklch(97.5% 0.018  70);    /* #fff7ed – soft cream */
-  --color-paper-3:      oklch(96%   0.020  315);   /* one elevation step */
-  --color-surface:      oklch(99.5% 0.005  315);   /* near-white card */
+@theme {
+  /* ── Typography ── */
+  --font-display: "Poppins", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "Poppins", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
-  /* ── Ink (text) ── */
-  --color-ink:          oklch(28%   0.030  290);   /* deep violet-grey */
-  --color-ink-2:        oklch(45%   0.030  290);   /* mid */
-  --color-muted:        oklch(58%   0.025  290);   /* de-emphasised */
+  /* ── Paper (background surfaces) — warm cream cluster ── */
+  --color-paper:        oklch(95%   0.030  75);
+  --color-paper-2:      oklch(97%   0.005  90);
+  --color-paper-3:      oklch(92%   0.025  75);
+  --color-surface:      oklch(98%   0.005  90);
+
+  /* ── Ink (text) — warm maroon-brown ── */
+  --color-ink:          oklch(22%   0.045  30);
+  --color-ink-2:        oklch(38%   0.025  30);
+  --color-muted:        oklch(50%   0.020  30);
 
   /* ── Rules / dividers ── */
-  --color-rule:         oklch(90%   0.018  315);
-  --color-rule-2:       oklch(94%   0.012  315);
+  --color-rule:         oklch(88%   0.012  75);
+  --color-rule-2:       oklch(93%   0.008  80);
 
-  /* ── Accent (pink → violet, the brand pair) ── */
-  --color-accent-pink:    oklch(66%  0.22  0);     /* #ec4899 */
-  --color-accent-violet:  oklch(60%  0.22  295);   /* #8b5cf6 */
-  --color-accent-ink:     oklch(99%  0     0);     /* white text on accent */
-  --color-focus:          oklch(60%  0.22  295);   /* violet focus ring */
+  /* ── Accent ── */
+  --color-accent-pink:    oklch(50%  0.180  40);
+  --color-accent-violet:  oklch(28%  0.060  30);
+  --color-accent-ink:     oklch(98%  0.005  90);
+  --color-focus:          oklch(50%  0.180  40);
 
-  /* ── Pastel card palette (low-chroma surfaces) ── */
-  --color-card-purple:  oklch(94%   0.040  300);   /* #f3e8ff */
-  --color-card-pink:    oklch(93%   0.040  0);     /* #fce7f3 */
-  --color-card-blue:    oklch(94%   0.038  240);   /* #dbeafe */
-  --color-card-mint:    oklch(94%   0.040  155);   /* fresh mint */
-  --color-card-amber:   oklch(94%   0.060  85);    /* warm amber */
+  /* ── Pastel card palette — warm-anchored cluster ── */
+  --color-card-purple:  oklch(91%   0.045  50);
+  --color-card-pink:    oklch(88%   0.055  15);
+  --color-card-blue:    oklch(89%   0.035  145);
+  --color-card-mint:    oklch(90%   0.055  130);
+  --color-card-amber:   oklch(88%   0.080  90);
 
-  /* ── Card text (deeper version of card hue, AAA contrast) ── */
-  --color-on-purple:    oklch(35%   0.10   295);
-  --color-on-pink:      oklch(35%   0.12   0);
-  --color-on-blue:      oklch(35%   0.10   240);
-  --color-on-mint:      oklch(35%   0.10   155);
-  --color-on-amber:     oklch(35%   0.10   75);
+  /* ── Card text (deeper version of card hue, AA contrast) ── */
+  --color-on-purple:    oklch(35%   0.08   50);
+  --color-on-pink:      oklch(35%   0.10   15);
+  --color-on-blue:      oklch(35%   0.07   145);
+  --color-on-mint:      oklch(35%   0.08   130);
+  --color-on-amber:     oklch(35%   0.10   85);
 
   /* ── Feedback ── */
-  --color-correct:        oklch(72%  0.16  150);
-  --color-correct-text:   oklch(40%  0.16  150);
-  --color-correct-bg:     oklch(94%  0.060 150);
-  --color-wrong:          oklch(64%  0.20  25);
-  --color-wrong-text:     oklch(45%  0.20  25);
-  --color-wrong-bg:       oklch(94%  0.050 25);
-  --color-urgent:         oklch(58%  0.24  25);
+  --color-correct:        oklch(60%  0.140  150);
+  --color-correct-text:   oklch(35%  0.105  150);
+  --color-correct-bg:     oklch(92%  0.040  145);
+  --color-wrong:          oklch(60%  0.180  30);
+  --color-wrong-text:     oklch(42%  0.160  30);
+  --color-wrong-bg:       oklch(92%  0.045  25);
+  --color-urgent:         oklch(55%  0.200  30);
 
-  /* ── Typography ── */
-  --font-display:  "Poppins", ui-sans-serif, system-ui, sans-serif;
-  --font-body:     "Poppins", ui-sans-serif, system-ui, sans-serif;
-  --font-mono:     ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  /* ── Shadows ── */
+  --shadow-xs:  0 1px 2px oklch(40% 0.10 30 / 0.05);
+  --shadow-sm:  0 2px 4px oklch(40% 0.10 30 / 0.08),
+                0 1px 2px oklch(40% 0.10 30 / 0.05);
+  --shadow-md:  0 6px 16px -4px oklch(40% 0.12 30 / 0.12),
+                0 2px 4px -1px oklch(40% 0.12 30 / 0.07);
+  --shadow-lg:  0 14px 32px -8px oklch(40% 0.14 30 / 0.16),
+                0 4px 10px -2px oklch(40% 0.14 30 / 0.10);
+  --shadow-glow-pink:   0 8px 24px -6px oklch(50% 0.180 40  / 0.40);
+  --shadow-glow-violet: 0 8px 24px -6px oklch(28% 0.060 30 / 0.40);
 
-  --text-xs:    0.75rem;
-  --text-sm:    0.875rem;
-  --text-base:  1rem;
+  /* ── Animations ── */
+  --animate-fade-in:    fade-in 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+  --animate-slide-up:   slide-up 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+  --animate-scale-in:   scale-in 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+  --animate-shake:      shake 0.5s cubic-bezier(.36,.07,.19,.97);
+  --animate-bounce-in:  bounce-in 0.6s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+  --animate-float:      float 3s ease-in-out infinite;
+  --animate-pulse-soft: pulse-soft 2s ease-in-out infinite;
+}
+
+/* ── Non-theme custom properties (pure CSS, no Tailwind utilities) ── */
+:root {
   --text-md:    1.125rem;
-  --text-lg:    1.25rem;
-  --text-xl:    1.5rem;
-  --text-2xl:   2rem;
-  --text-3xl:   2.5rem;
-  --text-4xl:   3.25rem;
   --text-display: clamp(2.75rem, 6vw + 1rem, 4.5rem);
 
-  /* ── Spacing (4-pt scale) ── */
   --space-xs:   0.25rem;
   --space-sm:   0.5rem;
   --space-md:   1rem;
@@ -83,7 +98,6 @@
   --space-3xl:  4rem;
   --space-4xl:  6rem;
 
-  /* ── Radii ── */
   --radius-sm:    0.5rem;
   --radius-md:    0.75rem;
   --radius-lg:    1rem;
@@ -91,18 +105,6 @@
   --radius-2xl:   1.5rem;
   --radius-pill:  999px;
 
-  /* ── Shadows (tinted toward accent) ── */
-  --shadow-xs:  0 1px 2px oklch(60% 0.10 295 / 0.05);
-  --shadow-sm:  0 2px 4px oklch(60% 0.10 295 / 0.06),
-                0 1px 2px oklch(60% 0.10 295 / 0.04);
-  --shadow-md:  0 6px 16px -4px oklch(60% 0.12 295 / 0.10),
-                0 2px 4px -1px oklch(60% 0.12 295 / 0.06);
-  --shadow-lg:  0 14px 32px -8px oklch(60% 0.14 295 / 0.14),
-                0 4px 10px -2px oklch(60% 0.14 295 / 0.08);
-  --shadow-glow-pink:  0 8px 24px -6px oklch(66% 0.22 0   / 0.40);
-  --shadow-glow-violet: 0 8px 24px -6px oklch(60% 0.22 295 / 0.40);
-
-  /* ── Motion ── */
   --dur-fast:    150ms;
   --dur-base:    250ms;
   --dur-slow:    400ms;
@@ -122,9 +124,9 @@ body {
   margin: 0;
   background: var(--color-paper);
   background-image:
-    radial-gradient(circle at 10% 0%, oklch(93% 0.06 0 / 0.45) 0, transparent 35%),
-    radial-gradient(circle at 90% 8%, oklch(93% 0.06 295 / 0.40) 0, transparent 38%),
-    radial-gradient(circle at 50% 100%, oklch(95% 0.05 240 / 0.35) 0, transparent 50%);
+    radial-gradient(circle at 10% 0%, oklch(90% 0.060 50 / 0.45) 0, transparent 35%),
+    radial-gradient(circle at 90% 8%, oklch(88% 0.080 90 / 0.40) 0, transparent 38%),
+    radial-gradient(circle at 50% 100%, oklch(89% 0.040 145 / 0.35) 0, transparent 50%);
   background-attachment: fixed;
   color: var(--color-ink);
   font-family: var(--font-body);
@@ -161,17 +163,66 @@ input:focus-visible {
 }
 
 ::selection {
-  background: oklch(66% 0.22 0 / 0.25);
+  background: oklch(50% 0.180 40 / 0.25);
   color: var(--color-ink);
 }
 
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: var(--color-paper-2); }
 ::-webkit-scrollbar-thumb {
-  background: oklch(85% 0.04 295);
+  background: oklch(82% 0.040 50);
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--color-accent-violet); }
+
+/* ================================================================
+   KEYFRAMES
+   ================================================================ */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slide-up {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes scale-in {
+  from { transform: scale(0.94); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  10%, 30%, 50%, 70%, 90% { transform: translateX(-4px); }
+  20%, 40%, 60%, 80% { transform: translateX(4px); }
+}
+
+@keyframes bounce-in {
+  0%  { transform: scale(0);    opacity: 0; }
+  50% { transform: scale(1.15); }
+  100%{ transform: scale(1);    opacity: 1; }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+@keyframes countdownPop {
+  0%   { transform: scale(0.4); opacity: 0; }
+  20%  { transform: scale(1.15); opacity: 1; }
+  60%  { transform: scale(1); opacity: 1; }
+  100% { transform: scale(1.35); opacity: 0; }
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
 
 /* ================================================================
    COMPONENT PATTERNS
@@ -203,8 +254,8 @@ input:focus-visible {
 .btn-primary:hover { transform: translateY(-2px); box-shadow: var(--shadow-glow-violet); filter: brightness(1.04); }
 .btn-primary:active { transform: translateY(0); filter: brightness(0.98); }
 .btn-primary:disabled {
-  background: oklch(88% 0.020 295);
-  color: oklch(60% 0.020 295);
+  background: oklch(85% 0.025 50);
+  color: oklch(55% 0.020 30);
   box-shadow: none;
   cursor: not-allowed;
   transform: none;
@@ -249,11 +300,11 @@ input:focus-visible {
 }
 .card:hover { transform: translateY(-4px); box-shadow: var(--shadow-md); }
 
-.card-purple { background: var(--color-card-purple); border-color: oklch(88% 0.05 300); }
-.card-pink   { background: var(--color-card-pink);   border-color: oklch(88% 0.06 0); }
-.card-blue   { background: var(--color-card-blue);   border-color: oklch(88% 0.05 240); }
-.card-mint   { background: var(--color-card-mint);   border-color: oklch(88% 0.05 155); }
-.card-amber  { background: var(--color-card-amber);  border-color: oklch(88% 0.07 85); }
+.card-purple { background: var(--color-card-purple); border-color: oklch(84% 0.060 50); }
+.card-pink   { background: var(--color-card-pink);   border-color: oklch(82% 0.075 15); }
+.card-blue   { background: var(--color-card-blue);   border-color: oklch(83% 0.050 145); }
+.card-mint   { background: var(--color-card-mint);   border-color: oklch(84% 0.075 130); }
+.card-amber  { background: var(--color-card-amber);  border-color: oklch(82% 0.100 90); }
 
 /* ── Badge / pill ── */
 .badge {
@@ -288,8 +339,8 @@ input:focus-visible {
 .input::placeholder { color: var(--color-muted); font-weight: 400; }
 .input:focus {
   outline: none;
-  border-color: var(--color-accent-violet);
-  box-shadow: 0 0 0 4px oklch(60% 0.22 295 / 0.15);
+  border-color: var(--color-accent-pink);
+  box-shadow: 0 0 0 4px oklch(50% 0.180 40 / 0.18);
 }
 
 /* ── Nav pill ── */
@@ -312,12 +363,6 @@ input:focus-visible {
 /* ── Countdown number animation ── */
 .countdown-number {
   animation: countdownPop 1s var(--ease-out) forwards;
-}
-@keyframes countdownPop {
-  0%   { transform: scale(0.4); opacity: 0; }
-  20%  { transform: scale(1.15); opacity: 1; }
-  60%  { transform: scale(1); opacity: 1; }
-  100% { transform: scale(1.35); opacity: 0; }
 }
 
 /* ── Confetti canvas ── */
@@ -347,12 +392,11 @@ input:focus-visible {
 .spinner {
   width: 32px;
   height: 32px;
-  border: 3px solid oklch(90% 0.04 295);
-  border-top-color: var(--color-accent-violet);
+  border: 3px solid oklch(88% 0.025 75);
+  border-top-color: var(--color-accent-pink);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
-@keyframes spin { to { transform: rotate(360deg); } }
 
 /* ── Option card (quiz answer) ── */
 .option-card {
@@ -370,7 +414,7 @@ input:focus-visible {
 }
 .option-card:hover:not(:disabled) {
   transform: translateY(-2px);
-  border-color: oklch(75% 0.10 295);
+  border-color: oklch(70% 0.12 40);
   box-shadow: var(--shadow-md);
 }
 .option-card:disabled { cursor: default; }
@@ -391,7 +435,7 @@ input:focus-visible {
   font-weight: 600;
   font-size: 0.875rem;
   border-radius: var(--radius-md);
-  border: 1px solid oklch(88% 0.05 240);
+  border: 1px solid oklch(83% 0.050 145);
   box-shadow: var(--shadow-sm);
 }
 .sticker-bubble::after {

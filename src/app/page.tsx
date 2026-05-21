@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Zap, Users, BookOpen, Brain, Star, Sparkles, Trophy, ArrowRight, Gamepad2, ArrowRightLeft } from 'lucide-react';
+import { Zap, Users, BookOpen, Star, Sparkles, Trophy, ArrowRight, Gamepad2, ArrowRightLeft } from 'lucide-react';
 
 export default function HomePage() {
   const router = useRouter();
@@ -93,9 +93,6 @@ export default function HomePage() {
       {/* ── Top nav pill ── */}
       <header className="px-4 pt-4 flex justify-center z-10">
         <div className="nav-pill border-2 border-rule shadow-sm bg-white flex items-center gap-3">
-          <div className="w-6 h-6 rounded-lg bg-accent-gradient flex items-center justify-center shadow-sm">
-            <Brain className="w-3.5 h-3.5 text-white" strokeWidth={2.5} />
-          </div>
           <span className="font-display text-sm font-black text-ink tracking-wide">
             KILAS CERDAS
           </span>
@@ -115,7 +112,7 @@ export default function HomePage() {
             <span className="relative inline-block">
               Adu Cerdas
               <svg
-                className="absolute -bottom-2 left-0 w-full h-3"
+                className="absolute -bottom-2 left-0 w-full h-3 mb-2"
                 viewBox="0 0 200 10"
                 preserveAspectRatio="none"
                 aria-hidden="true"
@@ -129,8 +126,8 @@ export default function HomePage() {
                 />
                 <defs>
                   <linearGradient id="u-redesign" x1="0" x2="1">
-                    <stop offset="0%" stopColor="oklch(66% 0.22 0)" />
-                    <stop offset="100%" stopColor="oklch(60% 0.22 295)" />
+                    <stop offset="0%" stopColor="oklch(50% 0.180 40)" />
+                    <stop offset="100%" stopColor="oklch(28% 0.060 30)" />
                   </linearGradient>
                 </defs>
               </svg>
@@ -144,7 +141,7 @@ export default function HomePage() {
 
         {/* Right Column: Workbench Action Lobby Card */}
         <div className="md:col-span-5 flex justify-center">
-          <div className="card w-full max-w-md border-3 border-ink shadow-lg bg-white relative animate-scale-in">
+          <div className="card w-full max-w-md border-[3px] border-ink shadow-lg bg-white relative animate-scale-in">
             <div className="space-y-6">
               <div>
                 <h2 className="font-display text-xl font-extrabold text-ink flex items-center gap-2">
@@ -253,13 +250,6 @@ export default function HomePage() {
           <span>© 2026 KILAS CERDAS</span>
         </div>
       </footer>
-
-      {/*
-        Hallmark · macrostructure: Split Workbench Layout · tone: playful
-        theme: studied-DNA (spec-locked pastel) · genre: playful
-        contrast: pass (46–50) · H1 hero size: xl (≤ 7 words)
-        nav: N5 floating-pill · footer: Ft8 minimal
-      */}
     </main>
   );
 }

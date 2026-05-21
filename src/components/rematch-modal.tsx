@@ -62,7 +62,7 @@ export default function RematchModal({
           id="rematch-modal-title"
           className="font-display text-xl font-extrabold text-ink mb-1 leading-tight"
         >
-          <span className="bg-accent-gradient bg-clip-text text-transparent">
+          <span className="text-accent-violet">
             {inviterName}
           </span>{' '}
           mengajak tantang lagi

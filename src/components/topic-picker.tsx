@@ -104,7 +104,7 @@ export default function TopicPicker({
       <div className="space-y-7 animate-slide-up">
 
         {/* Topic input */}
-        <div className="space-y-3">
+        <div className="space-y-3" suppressHydrationWarning>
           <label className="block text-xs font-bold text-muted tracking-wider uppercase">
             Topik Duel
           </label>
@@ -115,10 +115,9 @@ export default function TopicPicker({
               onChange={(e) => { setTopic(e.target.value); setError(''); }}
               onKeyDown={(e) => e.key === 'Enter' && handleGenerate()}
               placeholder="Contoh: Sains, Sejarah Indonesia, K-pop…"
-              className="input pr-12 text-base"
+              className="input text-base"
               disabled={isGenerating}
             />
-            <Sparkles className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-accent-violet pointer-events-none" />
           </div>
 
           {/* Topic chips */}
@@ -130,10 +129,10 @@ export default function TopicPicker({
                   key={label}
                   onClick={() => { setTopic(label); setError(''); }}
                   disabled={isGenerating}
-                  className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all
+                  className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-all border-2
                     ${active
-                      ? 'bg-accent-gradient text-white shadow-glow ring-2 ring-accent-violet/30'
-                      : `${card} text-ink hover:-translate-y-0.5 hover:shadow-sm border border-transparent`
+                      ? 'bg-white border-accent-violet text-accent-violet shadow-sm'
+                      : `${card} text-ink hover:-translate-y-0.5 hover:shadow-sm border-transparent`
                     }`}
                 >
                   {label}
@@ -163,14 +162,9 @@ export default function TopicPicker({
                     }`}
                 >
                   {n}
-                  <span className={`block text-[10px] font-semibold uppercase tracking-wider mt-1 ${active ? 'text-on-purple/70' : 'text-muted'}`}>
+                  <span className={`block text-xs font-bold uppercase tracking-wider mt-1 ${active ? 'text-on-purple' : 'text-ink-2'}`}>
                     soal
                   </span>
-                  {active && (
-                    <span className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-accent-gradient flex items-center justify-center text-white text-xs shadow-glow">
-                      ✓
-                    </span>
-                  )}
                 </button>
               );
             })}
@@ -196,7 +190,7 @@ export default function TopicPicker({
           <p className="text-muted text-sm mb-5">
             Membuat <strong>{questionCount}</strong> soal tentang <strong>“{topic}”</strong>
           </p>
-          <div className="flex justify-center gap-1.5">
+          <div className="flex justify-center gap-1.5 pt-3">
             {[0, 1, 2].map((i) => (
               <span
                 key={i}
@@ -214,7 +208,7 @@ export default function TopicPicker({
           <h3 className="font-display text-base font-extrabold text-on-amber mb-1">
             Siap duel?
           </h3>
-          <p className="text-xs text-muted">
+          <p className="text-sm font-medium text-ink-2">
             Klik tombol di bawah dan kami akan generate soalnya.
           </p>
         </div>
@@ -224,7 +218,7 @@ export default function TopicPicker({
       <button
         onClick={handleGenerate}
         disabled={isGenerating || !topic.trim()}
-        className="btn-primary w-full text-base py-4"
+        className="w-full text-base py-4 bg-accent-violet hover:bg-accent-violet/90 disabled:bg-muted disabled:cursor-not-allowed disabled:transform-none text-white font-bold rounded-full transition-all shadow-md hover:-translate-y-0.5 active:translate-y-0 flex items-center justify-center gap-2 border-2 border-ink"
       >
         {isGenerating ? (
           <><Loader2 className="w-5 h-5 animate-spin" /> Memproses…</>

@@ -57,7 +57,8 @@ Aturan:
 - Jangan berikan soal yang ambigu
 - Variasikan tingkat kesulitan
 - Gunakan bahasa Indonesia
-- Response HARUS JSON array VALID, tanpa markdown formatting`;
+- Response HARUS JSON array VALID, tanpa markdown formatting
+- JANGAN buat pertanyaan yang sama, serupa, atau duplikat secara konten/makna satu sama lain. Setiap soal harus unik, membahas aspek yang berbeda dari topik, dan tidak boleh mengulang informasi yang mirip dari soal lain dalam daftar ini.`;
 
     const result = await model.generateContent(prompt);
     const response = await result.response;
