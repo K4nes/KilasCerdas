@@ -1,9 +1,12 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { Copy, Check, Users, Clock, Zap, Brain, RefreshCw, Home, Crown, Sparkles, Trophy } from 'lucide-react';
+import { Copy, Check, Users, Clock, Zap, Brain, RefreshCw, Home, Crown, Sparkles, Trophy, Loader2 } from 'lucide-react';
 import { getSocket, disconnectSocket } from '@/lib/socket';
+import { ToastList, type Toast, type ToastVariant } from '@/components/toast';
+import RematchModal from '@/components/rematch-modal';
+import TopicPicker, { type GeneratedQuestion } from '@/components/topic-picker';
 
 // ─── Types ────────────────────────────────────────────────────
 interface Player {
@@ -19,7 +22,7 @@ interface Question {
   correctIndex: number;
 }
 
-type RoomStatus = 'waiting' | 'countdown' | 'playing' | 'finished';
+type RoomStatus = 'waiting' | 'countdown' | 'playing' | 'finished' | 'topic_select';
 
 interface RoomData {
   id: string;
@@ -28,6 +31,12 @@ interface RoomData {
   status: RoomStatus;
   currentQuestion?: number;
   hostId?: string;
+}
+
+interface RematchInvite {
+  inviterId: string;
+  inviterName: string;
+  expiresAt: number;
 }
 
 // ─── Confetti Engine ───────────────────────────────────────────
@@ -139,12 +148,54 @@ export default function RoomPage() {
     topic: string;
   } | null>(null);
 
-  const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const toastTimers = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
   const confettiCanvasRef = useRef<HTMLCanvasElement>(null);
   const stopConfettiRef = useRef<(() => void) | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const timerStartRef = useRef<number>(0);
+
+  // ─── Rematch state ────────────────────────────────────────────
+  // `rematchInvite !== null` indicates a pending invite. Whether *I* am the
+  // inviter or the target is derived from `inviterId === playerId`.
+  // - inviting → I sent it, button shows spinner + countdown
+  // - incoming → opponent sent it, modal mounts on top (button stays idle)
+  // - locked   → previous invite was declined/timed out (slice 04, symmetric)
+  // - else     → button is `idle`
+  const [rematchInvite, setRematchInvite] = useState<RematchInvite | null>(null);
+  // Live ms-remaining for the inviter's button countdown. Synced from
+  // rematchInvite.expiresAt via setInterval; cleared on transitions.
+  const [inviteRemainingMs, setInviteRemainingMs] = useState(0);
+  // Slice 04 — symmetric lock state. Both players go locked on decline/timeout;
+  // both reset to false on a successful accept (server is the source of truth,
+  // but reload-restore is slice 06's job — this slice will regress to idle on
+  // reload, that's expected).
+  const [myRematchLocked, setMyRematchLocked] = useState(false);
+  // What role I had in the last invite cycle, used to pick the right subtitle
+  // and toast on `rematch_resolved`. Set when a new invite arrives, cleared
+  // when accept loops back. Persists alongside `myRematchLocked` so the
+  // locked-state subtitle can render correctly after the invite itself
+  // disappears.
+  const [lastInviteRole, setLastInviteRole] = useState<'inviter' | 'target' | null>(null);
+  // Mirror of lastInviteRole so the socket handler closure (registered once
+  // per mount) can read the up-to-date role without re-attaching listeners.
+  const lastInviteRoleRef = useRef<'inviter' | 'target' | null>(null);
+  // Carried from `room_state_changed` so TopicPicker can pre-fill in
+  // topic_select when the host re-renders. Falls back to roomData.topic.
+  const [lastTopic, setLastTopic] = useState<string>('');
+  const [lastQuestionCount, setLastQuestionCount] = useState<number>(5);
+
+  // ─── Toast helpers ───────────────────────────────────────────
+  const pushToast = useCallback((message: string, variant: ToastVariant = 'neutral') => {
+    const id = `toast_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    setToasts(prev => [...prev, { id, message, variant }]);
+    const timer = setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+      toastTimers.current.delete(timer);
+    }, 3000);
+    toastTimers.current.add(timer);
+  }, []);
 
   // ─── Init ────────────────────────────────────────────────────
   useEffect(() => {
@@ -167,6 +218,55 @@ export default function RoomPage() {
       setPlayers(data.players);
       setRoomData(data.room);
       setStatus(data.room.status);
+
+      // Slice 06: restore rematch state from the extended payload so reload
+      // during inviting/locked/topic_select reconstructs cleanly.
+      //
+      // `lastTopic`/`lastQuestionCount` always present (server sends them
+      // unconditionally; they're harmless outside topic_select but become the
+      // pre-fill source for the host's TopicPicker when re-rendering inside
+      // topic_select after reload).
+      if (typeof data.lastTopic === 'string') setLastTopic(data.lastTopic);
+      if (typeof data.lastQuestionCount === 'number') {
+        setLastQuestionCount(data.lastQuestionCount);
+      }
+
+      if (data.rematchInvite) {
+        // Live invite in flight on reload. Hydrate state + ref so the
+        // inviter's countdown effect picks up immediately and the modal
+        // mounts for the target. expiresAt is absolute, so the countdown
+        // effect already computes remaining via `expiresAt - Date.now()`
+        // each tick — no special handling needed.
+        setRematchInvite(data.rematchInvite);
+        setInviteRemainingMs(Math.max(0, data.rematchInvite.expiresAt - Date.now()));
+        const role: 'inviter' | 'target' =
+          data.rematchInvite.inviterId === data.playerId ? 'inviter' : 'target';
+        setLastInviteRole(role);
+        lastInviteRoleRef.current = role;
+      } else {
+        // No live invite. If I'm locked, derive role from server-persisted
+        // `lastInviterId` so the locked subtitle reads correctly after
+        // reload. Without this, slice 04's locked-button subtitle would
+        // collapse to the generic "Rematch ditolak" for everyone — fine for
+        // the decliner, wrong for the inviter (who should see "Lawan
+        // menolak").
+        setRematchInvite(null);
+        setInviteRemainingMs(0);
+        if (data.myRematchLocked && data.lastInviterId) {
+          const role: 'inviter' | 'target' =
+            data.lastInviterId === data.playerId ? 'inviter' : 'target';
+          setLastInviteRole(role);
+          lastInviteRoleRef.current = role;
+        } else {
+          // Either not locked, or locked but no persisted inviter (defensive
+          // — shouldn't happen, but fall back to clearing role rather than
+          // showing a stale one from a previous reload).
+          setLastInviteRole(null);
+          lastInviteRoleRef.current = null;
+        }
+      }
+
+      setMyRematchLocked(data.myRematchLocked === true);
     });
 
     socket.on('room_created', (data) => {
@@ -184,7 +284,21 @@ export default function RoomPage() {
     });
     socket.on('player_reconnected', (data) => setPlayers(data.players));
 
-    socket.on('error_message', (data) => setError(data.message));
+    socket.on('error_message', (data) => {
+      pushToast(data.message, 'red');
+      // Slice 05: messages emitted by the topic_select 60s-timeout teardown
+      // signal that the room has been deleted server-side. Show the toast,
+      // then redirect home so the user isn't stranded on a dead room.
+      if (
+        data.message === 'Host meninggalkan room' ||
+        data.message === 'Lawan keluar room'
+      ) {
+        setTimeout(() => {
+          disconnectSocket();
+          router.push('/');
+        }, 1500);
+      }
+    });
 
     socket.on('duel_started', () => setStatus('countdown'));
 
@@ -241,11 +355,120 @@ export default function RoomPage() {
       });
     });
 
+    // ─── Rematch flow ────────────────────────────────────────────
+    socket.on('rematch_invite_received', (data: RematchInvite) => {
+      setRematchInvite(data);
+      setInviteRemainingMs(Math.max(0, data.expiresAt - Date.now()));
+      // Track my role for the subsequent `rematch_resolved` so we can pick
+      // the right toast/subtitle. Cleared on accept loop-back.
+      const role = data.inviterId === playerId ? 'inviter' : 'target';
+      setLastInviteRole(role);
+      lastInviteRoleRef.current = role;
+    });
+
+    socket.on('rematch_resolved', (data: {
+      accepted: boolean;
+      declinerId: string | null;
+      reason: 'accepted' | 'declined' | 'timeout' | 'inviter_disconnected' | 'opponent_disconnected';
+    }) => {
+      // Always clear local invite + countdown — the invite cycle is over.
+      setRematchInvite(null);
+      setInviteRemainingMs(0);
+
+      if (data.reason === 'accepted') {
+        // Loop back to idle for the next rematch round. Screen transition is
+        // driven by `room_state_changed` below.
+        setMyRematchLocked(false);
+        setLastInviteRole(null);
+        lastInviteRoleRef.current = null;
+        return;
+      }
+
+      if (data.reason === 'declined') {
+        // Symmetric lock: both players locked.
+        setMyRematchLocked(true);
+        if (data.declinerId === playerId) {
+          // I declined — modal action was explicit feedback enough; no toast.
+          // Subtitle on my locked button will read "Rematch ditolak".
+        } else {
+          // I was the inviter (the only other side that can receive declined).
+          pushToast('Lawan menolak ajakan', 'pink');
+        }
+        return;
+      }
+
+      if (data.reason === 'timeout') {
+        // Symmetric lock on auto-decline. Toast depends on my role; read from
+        // ref so we see the up-to-date value (this handler closure was
+        // registered at mount and never re-binds).
+        setMyRematchLocked(true);
+        if (lastInviteRoleRef.current === 'inviter') {
+          pushToast('Lawan tidak merespons', 'pink');
+        } else {
+          // Target who AFK'd through the modal — let them know the cycle ended.
+          pushToast('Ajakan rematch berakhir', 'pink');
+        }
+        return;
+      }
+
+      // Slice 05: disconnect-driven reasons. No lock — disconnect is not
+      // rejection. Both reasons surface the same neutral toast to the
+      // surviving party. The button will naturally render as
+      // `opponent_offline` once `player_disconnected` flips connected=false.
+      if (
+        data.reason === 'inviter_disconnected' ||
+        data.reason === 'opponent_disconnected'
+      ) {
+        // Always clear role tracking — the cycle is over and there's no
+        // locked state to subtitle for.
+        setLastInviteRole(null);
+        lastInviteRoleRef.current = null;
+        pushToast('Lawan keluar room', 'neutral');
+        return;
+      }
+    });
+
+    socket.on('room_state_changed', (data: {
+      status: RoomStatus;
+      hostId: string;
+      lastTopic: string;
+      lastQuestionCount: number;
+    }) => {
+      setStatus(data.status);
+      setLastTopic(data.lastTopic);
+      setLastQuestionCount(data.lastQuestionCount);
+      setRoomData(prev => prev ? {
+        ...prev,
+        status: data.status,
+        hostId: data.hostId,
+        topic: data.lastTopic,
+        questionCount: data.lastQuestionCount,
+      } : prev);
+      // Match #N reset: clear any stale duel state so the new countdown +
+      // questions render cleanly when status flips back to countdown/playing.
+      if (data.status === 'topic_select') {
+        setResult(null);
+        setCurrentQuestion(null);
+        setSelectedAnswer(null);
+        setAnswerState('pending');
+        setCorrectAnswer(null);
+        setShowAnswerFeedback(false);
+        setScores({});
+        setCountdown(null);
+        if (stopConfettiRef.current) {
+          stopConfettiRef.current();
+          stopConfettiRef.current = null;
+        }
+      }
+    });
+
     socket.emit('join_room', { roomId, playerName, playerId });
 
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
       if (stopConfettiRef.current) stopConfettiRef.current();
+      toastTimers.current.forEach(clearTimeout);
+      toastTimers.current.clear();
     };
   }, [mounted, roomId, playerName, playerId]);
 
@@ -270,13 +493,68 @@ export default function RoomPage() {
     setTimeout(() => setCopied(false), 1800);
   };
 
+  // Slice 03: replace the old disconnect+redirect with an in-room invite.
+  // Server broadcasts `rematch_invite_received` back to both players so the
+  // inviter's local button state is driven by the same event, not by an
+  // optimistic local mutation here.
   const handleRematch = () => {
-    disconnectSocket();
-    if (roomData?.topic) router.push(`/create?topic=${encodeURIComponent(roomData.topic)}`);
-    else router.push('/create');
+    getSocket().emit('rematch_invite', { roomId });
   };
 
+  const handleAcceptRematch = () => {
+    getSocket().emit('rematch_response', { roomId, accept: true });
+  };
+
+  const handleDeclineRematch = () => {
+    getSocket().emit('rematch_response', { roomId, accept: false });
+  };
+
+  // Host TopicPicker submit handler — emits rematch_start, holds the
+  // picker's loading spinner until the server confirms via `duel_started`.
+  // Mirrors the /create page's create_room round-trip pattern.
+  const handleRematchStart = (topic: string, questions: GeneratedQuestion[]) =>
+    new Promise<void>((resolve, reject) => {
+      const socket = getSocket();
+      const timeoutId = setTimeout(() => {
+        socket.off('duel_started', onDuelStarted);
+        socket.off('error_message', onError);
+        reject(new Error('Timeout memulai duel. Coba lagi.'));
+      }, 10000);
+      const onDuelStarted = () => {
+        clearTimeout(timeoutId);
+        socket.off('duel_started', onDuelStarted);
+        socket.off('error_message', onError);
+        resolve();
+      };
+      const onError = (data: { message: string }) => {
+        clearTimeout(timeoutId);
+        socket.off('duel_started', onDuelStarted);
+        socket.off('error_message', onError);
+        reject(new Error(data.message || 'Gagal memulai duel'));
+      };
+      socket.once('duel_started', onDuelStarted);
+      socket.once('error_message', onError);
+      socket.emit('rematch_start', {
+        roomId,
+        topic,
+        questions,
+        questionCount: questions.length,
+      });
+    });
+
   const handleGoHome = () => { disconnectSocket(); router.push('/'); };
+
+  // ─── Inviter button live countdown ───────────────────────────
+  // Tick at 100ms so the integer-second label updates smoothly. Only runs
+  // while *I* am the inviter (modal handles its own ticking for the target).
+  useEffect(() => {
+    if (!rematchInvite || rematchInvite.inviterId !== playerId) return;
+    const id = setInterval(() => {
+      const remaining = Math.max(0, rematchInvite.expiresAt - Date.now());
+      setInviteRemainingMs(remaining);
+    }, 100);
+    return () => clearInterval(id);
+  }, [rematchInvite, playerId]);
 
   // ─── Helpers ─────────────────────────────────────────────────
   const myScore       = scores[playerId] || 0;
@@ -297,30 +575,54 @@ export default function RoomPage() {
     );
   }
 
-  if (error && !roomData) {
-    return (
-      <div className="min-h-screen flex items-center justify-center px-4">
-        <div className="card text-center max-w-sm w-full">
-          <div className="w-16 h-16 mx-auto rounded-2xl bg-feedback-wrong-bg flex items-center justify-center mb-4">
-            <span className="text-3xl">😢</span>
-          </div>
-          <h2 className="font-display text-xl font-extrabold text-ink mb-2">Oops!</h2>
-          <p className="text-muted text-sm mb-5">{error}</p>
-          <button onClick={() => router.push('/')} className="btn-primary w-full">
-            <Home className="w-4 h-4" /> Kembali ke Beranda
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   // ─── Result ──────────────────────────────────────────────────
   if (status === 'finished' && result) {
     const isWinner = result.winner?.id === playerId;
+    // Visual state for the "Tantang Lagi" button. Five states.
+    // Precedence: an in-flight invite (inviting/incoming) wins over everything
+    // else — the server prevents new invites when locked or while opponent is
+    // offline, so this only matters in resolved states. Below `incoming`,
+    // `opponent_offline` wins over `locked` because the opponent being absent
+    // is a more current/actionable signal than a stale rejection from the
+    // previous cycle.
+    const opponentOffline = opponent ? opponent.connected === false : false;
+    const rematchButtonState:
+      | 'idle'
+      | 'inviting'
+      | 'incoming'
+      | 'opponent_offline'
+      | 'locked' =
+      rematchInvite
+        ? rematchInvite.inviterId === playerId
+          ? 'inviting'
+          : 'incoming'
+        : opponentOffline
+          ? 'opponent_offline'
+          : myRematchLocked
+            ? 'locked'
+            : 'idle';
+    const inviteRemainingSec = Math.ceil(inviteRemainingMs / 1000);
+    // Subtitle text for the locked state. Per spec Section 6: inviter sees
+    // "Lawan menolak"; the decliner / AFK target sees "Rematch ditolak".
+    const lockedSubtitle =
+      lastInviteRole === 'inviter' ? 'Lawan menolak' : 'Rematch ditolak';
 
     return (
       <main className="min-h-screen flex flex-col items-center justify-center px-4 py-8">
+        <ToastList toasts={toasts} />
         <canvas ref={confettiCanvasRef} id="confetti-canvas" />
+
+        {/* Modal mounts on top when opponent invited me. Backdrop intentionally
+            non-dismissable; only Terima/Tolak/server timeout closes it. */}
+        {rematchButtonState === 'incoming' && rematchInvite && (
+          <RematchModal
+            inviterName={rematchInvite.inviterName}
+            lastTopic={roomData?.topic || result.topic || 'Umum'}
+            expiresAt={rematchInvite.expiresAt}
+            onAccept={handleAcceptRematch}
+            onDecline={handleDeclineRematch}
+          />
+        )}
 
         <div className="max-w-md w-full space-y-6 text-center animate-scale-in relative z-10">
           {/* Trophy */}
@@ -365,9 +667,37 @@ export default function RoomPage() {
 
           {/* Actions */}
           <div className="space-y-3">
-            <button onClick={handleRematch} className="btn-primary w-full text-base py-4">
-              <RefreshCw className="w-5 h-5" /> Tantang Lagi
+            <button
+              onClick={handleRematch}
+              disabled={
+                rematchButtonState === 'inviting' ||
+                rematchButtonState === 'locked' ||
+                rematchButtonState === 'opponent_offline'
+              }
+              className={`btn-primary w-full text-base py-4 ${
+                rematchButtonState === 'locked' ||
+                rematchButtonState === 'opponent_offline'
+                  ? 'opacity-50'
+                  : ''
+              }`}
+            >
+              {rematchButtonState === 'inviting' ? (
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  Menunggu jawaban… {inviteRemainingSec}s
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="w-5 h-5" /> Tantang Lagi
+                </>
+              )}
             </button>
+            {rematchButtonState === 'locked' && (
+              <p className="text-muted text-xs mt-2 text-center">{lockedSubtitle}</p>
+            )}
+            {rematchButtonState === 'opponent_offline' && (
+              <p className="text-muted text-xs mt-2 text-center">Lawan offline</p>
+            )}
 
             <button onClick={handleGoHome} className="btn-secondary w-full !py-3">
               <Home className="w-4 h-4" /> Beranda
@@ -383,6 +713,7 @@ export default function RoomPage() {
     const labelMap: Record<number, string> = { 0: 'GO!', 1: '1', 2: '2', 3: '3' };
     return (
       <main className="min-h-screen flex flex-col items-center justify-center bg-paper">
+        <ToastList toasts={toasts} />
         <div className="text-center space-y-4">
           <p className="badge"><Sparkles className="w-3 h-3" /> Bersiap…</p>
           <div key={countdown} className="countdown-number">
@@ -406,6 +737,7 @@ export default function RoomPage() {
 
     return (
       <main className="min-h-screen flex flex-col bg-paper">
+        <ToastList toasts={toasts} />
         {/* Top score bar */}
         <div className="sticky top-0 z-20 bg-surface/95 backdrop-blur border-b border-rule-2 shadow-xs">
           <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
@@ -530,9 +862,143 @@ export default function RoomPage() {
     );
   }
 
+  // ─── Topic Select (post-rematch, pre-countdown) ──────────────
+  // Both players already accepted; this is the bridge between match #N-1's
+  // result screen and match #N's countdown. Host picks topic; guest waits.
+  // Clean slate per spec — no scores from previous match shown here.
+  if (status === 'topic_select') {
+    const fallbackTopic = lastTopic || roomData?.topic || 'Umum';
+    const fallbackQuestionCount = lastQuestionCount || roomData?.questionCount || 5;
+
+    return (
+      <main className="min-h-screen flex flex-col items-center px-4 py-8 md:py-12">
+        <ToastList toasts={toasts} />
+        <div className="max-w-md w-full space-y-7 animate-fade-in">
+
+          {/* Brand strip */}
+          <div className="flex items-center justify-center">
+            <div className="nav-pill !shadow-sm">
+              <span className="w-6 h-6 rounded-md bg-accent-gradient flex items-center justify-center">
+                <Brain className="w-3.5 h-3.5 text-white" strokeWidth={2.5} />
+              </span>
+              <span className="font-display text-sm font-extrabold text-ink">Match Baru</span>
+            </div>
+          </div>
+
+          {/* Avatars (no scores — clean slate per spec) */}
+          <div className="space-y-2.5">
+            <h3 className="text-[11px] font-bold text-muted tracking-wider uppercase flex items-center justify-center gap-2">
+              <Users className="w-3.5 h-3.5" />
+              Pemain
+            </h3>
+            {players.map((p, i) => {
+              const isMe = p.id === playerId;
+              const isHostRow = p.id === roomData?.hostId;
+              const card = AVATAR_CARDS[i % AVATAR_CARDS.length];
+              const text = AVATAR_TEXT[i % AVATAR_TEXT.length];
+              return (
+                <div
+                  key={p.id}
+                  className={`card flex items-center gap-3 !p-3 !shadow-sm
+                    ${isMe ? 'border-2 !border-accent-violet/40' : ''}
+                    ${p.connected === false ? 'opacity-60' : ''}`}
+                >
+                  <div className={`w-11 h-11 rounded-xl ${card} flex items-center justify-center font-display font-extrabold text-base ${text}`}>
+                    {p.name.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-ink truncate flex items-center gap-1.5">
+                      {p.name}
+                      {isMe && <span className="text-muted text-xs font-medium">(Kamu)</span>}
+                    </p>
+                    <p className="text-xs text-muted flex items-center gap-1">
+                      {p.connected === false
+                        ? <>⏳ Reconnecting…</>
+                        : isHostRow
+                          ? <><Crown className="w-3 h-3 text-accent-pink" /> Host</>
+                          : 'Pemain'}
+                    </p>
+                  </div>
+                  {p.connected !== false && (
+                    <span className="w-2.5 h-2.5 rounded-full bg-feedback-correct animate-pulse-soft" />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {isHost ? (
+            opponent?.connected === false ? (
+              // Slice 05: gate the TopicPicker while opponent is in the 60s
+              // reconnect window. The server validates `players.every(connected)`
+              // on `rematch_start` anyway, but rendering a disabled picker
+              // would let the host generate questions only to have the
+              // submission rejected — better to surface the wait state
+              // directly. If opponent comes back, the picker mounts fresh
+              // pre-filled with lastTopic/lastQuestionCount.
+              <div className="card card-blue !p-7 text-center animate-fade-in space-y-4">
+                <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-white/60 animate-pulse-soft">
+                  <Sparkles className="w-6 h-6 text-on-blue" strokeWidth={2.2} />
+                </div>
+                <div className="space-y-1">
+                  <h3 className="font-display text-lg font-extrabold text-on-blue">
+                    Menunggu lawan kembali online…
+                  </h3>
+                  <p className="text-on-blue/70 text-xs">
+                    Pemilihan topik akan tersedia saat lawan reconnect.
+                  </p>
+                </div>
+                <div className="flex justify-center gap-1.5">
+                  {[0, 1, 2].map((i) => (
+                    <span
+                      key={i}
+                      className="w-2 h-2 rounded-full bg-accent-violet animate-bounce"
+                      style={{ animationDelay: `${i * 0.15}s` }}
+                    />
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <TopicPicker
+                submitLabel="Mulai Duel"
+                initialTopic={fallbackTopic}
+                initialQuestionCount={fallbackQuestionCount}
+                onSubmit={handleRematchStart}
+              />
+            )
+          ) : (
+            <div className="card card-purple !p-7 text-center animate-fade-in space-y-4">
+              <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-white/60 animate-pulse-soft">
+                <Sparkles className="w-6 h-6 text-on-purple" strokeWidth={2.2} />
+              </div>
+              <div className="space-y-1">
+                <h3 className="font-display text-lg font-extrabold text-on-purple">
+                  Host sedang memilih topik baru…
+                </h3>
+                <p className="text-on-purple/70 text-xs">
+                  Topik terakhir: <strong>{fallbackTopic}</strong>
+                </p>
+              </div>
+              <div className="flex justify-center gap-1.5">
+                {[0, 1, 2].map((i) => (
+                  <span
+                    key={i}
+                    className="w-2 h-2 rounded-full bg-accent-violet animate-bounce"
+                    style={{ animationDelay: `${i * 0.15}s` }}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </main>
+    );
+  }
+
   // ─── Lobby (default) ────────────────────────────────────────
   return (
     <main className="min-h-screen flex flex-col items-center px-4 py-8 md:py-12">
+      <ToastList toasts={toasts} />
       <div className="max-w-md w-full space-y-7 animate-fade-in">
 
         {/* Brand strip */}

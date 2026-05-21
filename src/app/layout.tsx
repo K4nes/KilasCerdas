@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
+import AgentationWrapper from '@/components/agentation-wrapper';
 
 export const metadata: Metadata = {
   title: 'Kilas Cerdas — Duel Pengetahuan Real-Time',
@@ -15,13 +16,14 @@ export const viewport: Viewport = {
   themeColor: '#faf5ff',
   width: 'device-width',
   initialScale: 1,
-};
+ };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="id" suppressHydrationWarning>
       <body className="font-body antialiased text-ink" suppressHydrationWarning>
         {children}
+        <AgentationWrapper />
       </body>
     </html>
   );
