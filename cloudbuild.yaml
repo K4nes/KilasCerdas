@@ -1,0 +1,32 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'asia-southeast2-docker.pkg.dev/$PROJECT_ID/kilascerdas/kilascerdas:${SHORT_SHA}'
+      - '.'
+    timeout: 600s
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'asia-southeast2-docker.pkg.dev/$PROJECT_ID/kilascerdas/kilascerdas:${SHORT_SHA}'
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'kilascerdas'
+      - '--image=asia-southeast2-docker.pkg.dev/$PROJECT_ID/kilascerdas/kilascerdas:${SHORT_SHA}'
+      - '--region=asia-southeast2'
+      - '--platform=managed'
+      - '--min-instances=1'
+      - '--max-instances=1'
+      - '--concurrency=1000'
+      - '--allow-unauthenticated'
+      - '--set-env-vars=GEMINI_API_KEY=$_GEMINI_API_KEY'
+
+substitutions:
+  _GEMINI_API_KEY: ''
+timeout: 900s

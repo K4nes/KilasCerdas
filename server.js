@@ -28,6 +28,10 @@ app.prepare().then(() => {
       origin: '*',
       methods: ['GET', 'POST'],
     },
+    transports: dev ? ['websocket', 'polling'] : ['polling'],
+    allowUpgrades: dev,
+    pingTimeout: dev ? 20000 : 120000,
+    pingInterval: dev ? 25000 : 60000,
   });
 
   const engine = new GameEngine();
