@@ -22,6 +22,7 @@ RUN npm ci --omit=dev && npm cache clean --force
 
 # Copy build artifacts and our custom server
 COPY --from=builder /app/.next ./.next
+COPY --from=builder /app/public ./public
 COPY --from=builder /app/src ./src
 COPY --from=builder /app/server.js ./server.js
 COPY --from=builder /app/next.config.js ./next.config.js
