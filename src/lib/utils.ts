@@ -1,22 +1,6 @@
-export function generateRoomCode(): string {
-  return Math.random().toString(36).substring(2, 8).toUpperCase();
-}
-
-export function generatePlayerId(): string {
-  return 'player_' + Math.random().toString(36).substring(2, 10);
-}
-
-export function calculateScore(
-  isCorrect: boolean,
-  timeTakenMs: number,
-  timeLimitMs: number
-): number {
-  if (!isCorrect) return 0;
-  const base = 100;
-  const timeRatio = Math.max(0, 1 - timeTakenMs / timeLimitMs);
-  const speedBonus = Math.round(timeRatio * 100);
-  return base + speedBonus;
-}
+// Server-side game-engine helpers (room codes, player IDs, scoring) live in
+// src/lib/game-engine.js. Keep this file scoped to *client-consumable*
+// fallback content for when the Gemini API is unreachable.
 
 export const SAMPLE_QUESTIONS: Record<string, { question: string; options: string[]; correctIndex: number }[]> = {
   'sains': [

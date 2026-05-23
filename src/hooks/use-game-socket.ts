@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useReducer, useRef, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { getSocket, disconnectSocket } from '@/lib/socket';
-import type { Player, RoomStatus, RematchInvite } from '@/lib/types';
+import type { RematchInvite, Player } from '@/lib/types';
+import { Events } from '@/lib/socket-events';
 import type {
   JoinedPayload,
   RoomCreatedPayload,
@@ -11,59 +12,102 @@ import type {
   RematchInviteReceived,
   RematchResolved,
   RoomStateChanged,
+  NewQuestionPayload,
+  AnswerResultPayload,
+  ScoreUpdatePayload,
+  CountdownPayload,
+  ErrorPayload,
+  PlayersPayload,
+  PlayerIdPayload,
 } from '@/lib/socket-events';
+import { useTimer } from '@/hooks/use-timer';
 import { ToastList, type Toast, type ToastVariant } from '@/components/toast';
 import type { GeneratedQuestion } from '@/components/topic-picker';
+import { QUESTION_TIME_LIMIT_MS, SERVER_ACK_TIMEOUT_MS } from '@/lib/game-config';
+import {
+  roomReducer,
+  initialRoomState,
+  type RoomState,
+  type RoomData,
+  type AnswerState,
+  type InviteRole,
+} from '@/lib/room-reducer';
 
-import type { Question } from '@/lib/types';
+/**
+ * useGameSocket — wires the room state machine (`roomReducer`) to the
+ * Socket.io transport, plus the side effects screens need (toasts,
+ * clipboard, navigation, invite countdown ticker).
+ *
+ * Architecture:
+ *   ┌─────────────────────────┐    Events.* payloads
+ *   │      Socket.io          │ ───────────────────────┐
+ *   └─────────────────────────┘                        ▼
+ *                                          ┌─────────────────────┐
+ *                                          │   roomReducer       │  pure
+ *                                          │  (room-reducer.ts)  │
+ *                                          └─────────────────────┘
+ *                                                     │
+ *                                                     ▼
+ *   screens read selector results ◄──── RoomState ────┘
+ *
+ * Pure state lives in the reducer (and is testable without React or
+ * Socket.io — see room-reducer.test.ts). Transient UI state that doesn't
+ * survive a refresh and isn't worth event-sourcing — `toasts` and
+ * `copied` — stays in component-local useState.
+ *
+ * The return shape is preserved against earlier callers; screens import
+ * fields by name (`status`, `qIndex`, `myScore`, etc.) and don't need to
+ * change.
+ */
 
-export interface RoomData {
-  id: string;
-  topic: string;
-  questionCount: number;
-  status: RoomStatus;
-  currentQuestion?: number;
-  hostId?: string;
-}
+const AVATAR_CARDS = ['card-purple', 'card-pink', 'card-blue', 'card-mint', 'card-amber'];
+const AVATAR_TEXT  = ['text-on-purple', 'text-on-pink', 'text-on-blue', 'text-on-mint', 'text-on-amber'];
+
+export { AVATAR_CARDS, AVATAR_TEXT };
+export type { RoomData };
 
 export interface UseGameSocketReturn {
+  // ── Identity / room ──
   playerId: string;
   playerName: string;
   isHost: boolean;
   players: Player[];
   roomData: RoomData | null;
-  status: RoomStatus;
+  status: RoomState['status'];
 
+  // ── Duel ──
   countdown: number | null;
-  currentQuestion: Question | null;
+  currentQuestion: RoomState['currentQuestion'];
   qIndex: number;
   totalQuestions: number;
   selectedAnswer: number | null;
-  answerState: 'pending' | 'correct' | 'wrong' | 'timeout';
+  answerState: AnswerState;
   correctAnswer: number | null;
   scores: Record<string, number>;
   timerWidth: number;
-  timerColor: 'safe' | 'warn' | 'urgent';
   showAnswerFeedback: boolean;
   myScore: number;
   opponent: Player | undefined;
   opponentScore: number;
   timerBgClass: string;
 
+  // ── Result ──
   result: DuelEndPayload | null;
 
+  // ── Rematch ──
   rematchInvite: RematchInvite | null;
   inviteRemainingMs: number;
   myRematchLocked: boolean;
-  lastInviteRole: 'inviter' | 'target' | null;
+  lastInviteRole: InviteRole;
   lastTopic: string;
   lastQuestionCount: number;
 
+  // ── UI ephemera ──
   toasts: Toast[];
   pushToast: (message: string, variant?: ToastVariant) => void;
-
   confettiCanvasRef: React.RefObject<HTMLCanvasElement>;
 
+  // ── Actions ──
   handleStartDuel: () => void;
   handleAnswer: (index: number) => void;
   handleCopyCode: () => void;
@@ -76,10 +120,10 @@ export interface UseGameSocketReturn {
   copied: boolean;
 }
 
-const AVATAR_CARDS = ['card-purple', 'card-pink', 'card-blue', 'card-mint', 'card-amber'];
-const AVATAR_TEXT  = ['text-on-purple', 'text-on-pink', 'text-on-blue', 'text-on-mint', 'text-on-amber'];
-
-export { AVATAR_CARDS, AVATAR_TEXT };
+// `ToastList` is re-exported so screens that already import via
+// `@/hooks/use-game-socket` can keep their import path. (Not strictly
+// part of the hook's interface, but preserved for stability.)
+export { ToastList };
 
 export function useGameSocket(): UseGameSocketReturn {
   const params = useParams();
@@ -87,41 +131,23 @@ export function useGameSocket(): UseGameSocketReturn {
   const roomId = params?.id as string;
 
   const [mounted, setMounted] = useState(false);
-  const [playerId, setPlayerId] = useState('');
-  const [playerName, setPlayerName] = useState('');
-  const [isHost, setIsHost] = useState(false);
-  const [players, setPlayers] = useState<Player[]>([]);
-  const [roomData, setRoomData] = useState<RoomData | null>(null);
-  const [status, setStatus] = useState<RoomStatus>('waiting');
+  const [state, dispatch] = useReducer(roomReducer, initialRoomState);
 
-  const [countdown, setCountdown] = useState<number | null>(null);
-  const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null);
-  const [qIndex, setQIndex] = useState(0);
-  const [totalQuestions, setTotalQuestions] = useState(0);
-  const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
-  const [answerState, setAnswerState] = useState<'pending' | 'correct' | 'wrong' | 'timeout'>('pending');
-  const [correctAnswer, setCorrectAnswer] = useState<number | null>(null);
-  const [scores, setScores] = useState<Record<string, number>>({});
-  const [timerWidth, setTimerWidth] = useState(100);
-  const [timerColor, setTimerColor] = useState<'safe' | 'warn' | 'urgent'>('safe');
-  const [showAnswerFeedback, setShowAnswerFeedback] = useState(false);
-
-  const [result, setResult] = useState<DuelEndPayload | null>(null);
-
+  // ── Transient UI state — not event-sourced, not in reducer. ──
   const [copied, setCopied] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const toastTimers = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
   const confettiCanvasRef = useRef<HTMLCanvasElement>(null);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const timerStartRef = useRef<number>(0);
 
-  const [rematchInvite, setRematchInvite] = useState<RematchInvite | null>(null);
-  const [inviteRemainingMs, setInviteRemainingMs] = useState(0);
-  const [myRematchLocked, setMyRematchLocked] = useState(false);
-  const [lastInviteRole, setLastInviteRole] = useState<'inviter' | 'target' | null>(null);
-  const lastInviteRoleRef = useRef<'inviter' | 'target' | null>(null);
-  const [lastTopic, setLastTopic] = useState<string>('');
-  const [lastQuestionCount, setLastQuestionCount] = useState<number>(5);
+  // The hook still needs to read role-at-resolution-time inside socket
+  // callbacks (closures over a stale state would mis-toast). We mirror
+  // the reducer's lastInviteRole into a ref so callbacks read the latest
+  // value without re-subscribing. This is the one place state escapes the
+  // reducer — kept narrow, documented, and one-way (reducer → ref).
+  const lastInviteRoleRef = useRef<InviteRole>(state.lastInviteRole);
+  useEffect(() => {
+    lastInviteRoleRef.current = state.lastInviteRole;
+  }, [state.lastInviteRole]);
 
   const pushToast = useCallback((message: string, variant: ToastVariant = 'neutral') => {
     const id = `toast_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -133,72 +159,86 @@ export function useGameSocket(): UseGameSocketReturn {
     toastTimers.current.add(timer);
   }, []);
 
+  // ── Identity bootstrap (one-time, from localStorage). ──
   useEffect(() => {
     setMounted(true);
     const pid  = localStorage.getItem('kilascerdas_player_id') || 'player_' + Math.random().toString(36).substring(2, 10);
     const name = localStorage.getItem('kilascerdas_player_name') || 'Player_' + Math.random().toString(36).substring(2, 6);
-    setPlayerId(pid);
-    setPlayerName(name);
     localStorage.setItem('kilascerdas_player_id', pid);
     localStorage.setItem('kilascerdas_player_name', name);
+    dispatch({ type: 'identity/load', playerId: pid, playerName: name });
   }, []);
 
+  // ── Wire ↔ reducer bridge. ──
   useEffect(() => {
     if (!mounted || !roomId) return;
     const socket = getSocket();
 
-    socket.on('joined', (data: JoinedPayload) => {
-      setIsHost(data.isHost);
-      setPlayers(data.players);
-      setRoomData(data.room);
-      setStatus(data.room.status);
-      setScores(data.scores ?? {});
-
-      if (typeof data.lastTopic === 'string') setLastTopic(data.lastTopic);
-      if (typeof data.lastQuestionCount === 'number') {
-        setLastQuestionCount(data.lastQuestionCount);
+    socket.on(Events.JOINED, (payload: JoinedPayload) => {
+      dispatch({ type: 'event/joined', payload });
+    });
+    socket.on(Events.ROOM_CREATED, (payload: RoomCreatedPayload) => {
+      dispatch({ type: 'event/room_created', payload });
+    });
+    socket.on(Events.PLAYER_JOINED, (payload: PlayersPayload) => {
+      dispatch({ type: 'event/player_joined', payload });
+    });
+    socket.on(Events.PLAYER_LEFT, (payload: PlayerIdPayload) => {
+      dispatch({ type: 'event/player_left', payload });
+    });
+    socket.on(Events.PLAYER_DISCONNECTED, (payload: PlayerIdPayload) => {
+      dispatch({ type: 'event/player_disconnected', payload });
+    });
+    socket.on(Events.PLAYER_RECONNECTED, (payload: PlayersPayload) => {
+      dispatch({ type: 'event/player_reconnected', payload });
+    });
+    socket.on(Events.DUEL_STARTED, () => {
+      dispatch({ type: 'event/duel_started' });
+    });
+    socket.on(Events.COUNTDOWN, (payload: CountdownPayload) => {
+      dispatch({ type: 'event/countdown', payload });
+    });
+    socket.on(Events.NEW_QUESTION, (payload: NewQuestionPayload) => {
+      dispatch({ type: 'event/new_question', payload });
+    });
+    socket.on(Events.ANSWER_RESULT, (payload: AnswerResultPayload) => {
+      dispatch({ type: 'event/answer_result', payload });
+    });
+    socket.on(Events.SCORE_UPDATE, (payload: ScoreUpdatePayload) => {
+      dispatch({ type: 'event/score_update', payload });
+    });
+    socket.on(Events.DUEL_END, (payload: DuelEndPayload) => {
+      dispatch({ type: 'event/duel_end', payload });
+    });
+    socket.on(Events.REMATCH_INVITE_RECEIVED, (payload: RematchInviteReceived) => {
+      dispatch({ type: 'event/rematch_invite_received', payload });
+    });
+    socket.on(Events.REMATCH_RESOLVED, (payload: RematchResolved) => {
+      // Reducer handles state; the hook owns the toast side effect because
+      // it needs the role-at-resolution-time and the toast queue.
+      dispatch({ type: 'event/rematch_resolved', payload });
+      const selfId = state.playerId;
+      switch (payload.reason) {
+        case 'declined':
+          if (payload.declinerId !== selfId) pushToast('Lawan menolak ajakan', 'pink');
+          break;
+        case 'timeout':
+          if (lastInviteRoleRef.current === 'inviter') {
+            pushToast('Lawan tidak merespons', 'pink');
+          } else {
+            pushToast('Ajakan rematch berakhir', 'pink');
+          }
+          break;
+        case 'inviter_disconnected':
+        case 'opponent_disconnected':
+          pushToast('Lawan keluar room', 'neutral');
+          break;
       }
-
-      if (data.rematchInvite) {
-        setRematchInvite(data.rematchInvite);
-        setInviteRemainingMs(Math.max(0, data.rematchInvite.expiresAt - Date.now()));
-        const role: 'inviter' | 'target' =
-          data.rematchInvite.inviterId === data.playerId ? 'inviter' : 'target';
-        setLastInviteRole(role);
-        lastInviteRoleRef.current = role;
-      } else {
-        setRematchInvite(null);
-        setInviteRemainingMs(0);
-        if (data.myRematchLocked && data.lastInviterId) {
-          const role: 'inviter' | 'target' =
-            data.lastInviterId === data.playerId ? 'inviter' : 'target';
-          setLastInviteRole(role);
-          lastInviteRoleRef.current = role;
-        } else {
-          setLastInviteRole(null);
-          lastInviteRoleRef.current = null;
-        }
-      }
-
-      setMyRematchLocked(data.myRematchLocked === true);
     });
-
-    socket.on('room_created', (data: RoomCreatedPayload) => {
-      setIsHost(data.isHost);
-      setPlayers(data.players);
-      setRoomData(data.room);
-      setStatus('waiting');
+    socket.on(Events.ROOM_STATE_CHANGED, (payload: RoomStateChanged) => {
+      dispatch({ type: 'event/room_state_changed', payload });
     });
-
-    socket.on('player_joined', (data: { players: Player[] }) => setPlayers(data.players));
-    socket.on('player_left', (data: { playerId: string }) => setPlayers(prev => prev.filter(p => p.id !== data.playerId)));
-
-    socket.on('player_disconnected', (data: { playerId: string }) => {
-      setPlayers(prev => prev.map(p => p.id === data.playerId ? { ...p, connected: false } : p));
-    });
-    socket.on('player_reconnected', (data: { players: Player[] }) => setPlayers(data.players));
-
-    socket.on('error_message', (data: { message: string }) => {
+    socket.on(Events.ERROR_MESSAGE, (data: ErrorPayload) => {
       pushToast(data.message, 'red');
       if (
         data.message === 'Host meninggalkan room' ||
@@ -211,150 +251,49 @@ export function useGameSocket(): UseGameSocketReturn {
       }
     });
 
-    socket.on('duel_started', () => setStatus('countdown'));
-
-    socket.on('countdown', (data: { count: number }) => {
-      setCountdown(data.count);
-      if (data.count < 0) setCountdown(null);
+    socket.emit(Events.JOIN_ROOM, {
+      roomId,
+      playerName: state.playerName,
+      playerId: state.playerId,
     });
-
-    socket.on('new_question', (data: {
-      index: number; question: string; options: string[];
-      timeLimit: number; totalQuestions: number; elapsedMs?: number;
-    }) => {
-      setCurrentQuestion({
-        question: data.question,
-        options: data.options,
-        correctIndex: 0,
-      });
-      setQIndex(data.index);
-      setTotalQuestions(data.totalQuestions);
-      setSelectedAnswer(null);
-      setAnswerState('pending');
-      setCorrectAnswer(null);
-      setShowAnswerFeedback(false);
-      setStatus('playing');
-
-      const initialElapsed = data.elapsedMs || 0;
-      const initialWidth = Math.max(0, 100 - (initialElapsed / 10000) * 100);
-      setTimerWidth(initialWidth);
-      setTimerColor(initialWidth < 30 ? 'urgent' : initialWidth < 60 ? 'warn' : 'safe');
-      timerStartRef.current = Date.now() - initialElapsed;
-
-      if (timerRef.current) clearInterval(timerRef.current);
-      timerRef.current = setInterval(() => {
-        const elapsed = Date.now() - timerStartRef.current;
-        const remaining = Math.max(0, 100 - (elapsed / 10000) * 100);
-        setTimerWidth(remaining);
-        if (remaining < 30) setTimerColor('urgent');
-        else if (remaining < 60) setTimerColor('warn');
-        else setTimerColor('safe');
-        if (elapsed >= 10000 && timerRef.current) clearInterval(timerRef.current);
-      }, 50);
-    });
-
-    socket.on('answer_result', (data: { correct: boolean; correctAnswer: number; scores: Record<string, number> }) => {
-      setCorrectAnswer(data.correctAnswer);
-      setScores(data.scores);
-      setAnswerState(data.correct ? 'correct' : 'wrong');
-      setShowAnswerFeedback(true);
-      if (timerRef.current) clearInterval(timerRef.current);
-    });
-
-    socket.on('score_update', (data: { scores: Record<string, number> }) => {
-      setScores(data.scores);
-    });
-
-    socket.on('duel_end', (data: DuelEndPayload) => {
-      setResult(data);
-      setScores(data.scores);
-      setStatus('finished');
-      if (timerRef.current) clearInterval(timerRef.current);
-    });
-
-    socket.on('rematch_invite_received', (data: RematchInviteReceived) => {
-      const invite: RematchInvite = { ...data };
-      setRematchInvite(invite);
-      setInviteRemainingMs(Math.max(0, data.expiresAt - Date.now()));
-      const role = data.inviterId === playerId ? 'inviter' : 'target';
-      setLastInviteRole(role);
-      lastInviteRoleRef.current = role;
-    });
-
-    socket.on('rematch_resolved', (data: RematchResolved) => {
-      setRematchInvite(null);
-      setInviteRemainingMs(0);
-
-      if (data.reason === 'accepted') {
-        setMyRematchLocked(false);
-        setLastInviteRole(null);
-        lastInviteRoleRef.current = null;
-        return;
-      }
-
-      if (data.reason === 'declined') {
-        setMyRematchLocked(true);
-        if (data.declinerId !== playerId) {
-          pushToast('Lawan menolak ajakan', 'pink');
-        }
-        return;
-      }
-
-      if (data.reason === 'timeout') {
-        setMyRematchLocked(true);
-        if (lastInviteRoleRef.current === 'inviter') {
-          pushToast('Lawan tidak merespons', 'pink');
-        } else {
-          pushToast('Ajakan rematch berakhir', 'pink');
-        }
-        return;
-      }
-
-      if (data.reason === 'inviter_disconnected' || data.reason === 'opponent_disconnected') {
-        setLastInviteRole(null);
-        lastInviteRoleRef.current = null;
-        pushToast('Lawan keluar room', 'neutral');
-      }
-    });
-
-    socket.on('room_state_changed', (data: RoomStateChanged) => {
-      setStatus(data.status);
-      setLastTopic(data.lastTopic);
-      setLastQuestionCount(data.lastQuestionCount);
-      setRoomData(prev => prev ? {
-        ...prev,
-        status: data.status,
-        hostId: data.hostId,
-        topic: data.lastTopic,
-        questionCount: data.lastQuestionCount,
-      } : prev);
-      if (data.status === 'topic_select') {
-        setResult(null);
-        setCurrentQuestion(null);
-        setSelectedAnswer(null);
-        setAnswerState('pending');
-        setCorrectAnswer(null);
-        setShowAnswerFeedback(false);
-        setScores({});
-        setCountdown(null);
-      }
-    });
-
-    socket.emit('join_room', { roomId, playerName, playerId });
 
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
       toastTimers.current.forEach(clearTimeout);
       toastTimers.current.clear();
     };
-  }, [mounted, roomId, playerName, playerId, router, pushToast]);
+    // We intentionally read state.playerId/Name fresh on mount-effect runs;
+    // adding them as deps would re-subscribe to the socket every identity
+    // tick. The wire setup runs once per room visit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mounted, roomId, router, pushToast]);
 
-  const handleStartDuel = () => getSocket().emit('start_duel', { roomId });
+  // ── Invite countdown tick — only the inviter renders a live remaining
+  // counter; the target gets it from the rematch modal which has its own
+  // tick. We dispatch into the reducer so the value can be selected from
+  // a single state shape.
+  useEffect(() => {
+    const invite = state.rematchInvite;
+    if (!invite || invite.inviterId !== state.playerId) return;
+    const id = setInterval(() => {
+      dispatch({
+        type: 'ui/invite_tick',
+        remainingMs: Math.max(0, invite.expiresAt - Date.now()),
+      });
+    }, 100);
+    return () => clearInterval(id);
+  }, [state.rematchInvite, state.playerId]);
+
+  // ── Action handlers — emit + (where needed) optimistic dispatch. ──
+  const handleStartDuel = () => getSocket().emit(Events.START_DUEL, { roomId });
 
   const handleAnswer = (index: number) => {
-    if (selectedAnswer !== null || answerState !== 'pending') return;
-    setSelectedAnswer(index);
-    getSocket().emit('submit_answer', { roomId, answer: index, playerId });
+    if (state.selectedAnswer !== null || state.answerState !== 'pending') return;
+    dispatch({ type: 'ui/select_answer', index });
+    getSocket().emit(Events.SUBMIT_ANSWER, {
+      roomId,
+      answer: index,
+      playerId: state.playerId,
+    });
   };
 
   const handleCopyCode = () => {
@@ -364,40 +303,40 @@ export function useGameSocket(): UseGameSocketReturn {
   };
 
   const handleRematch = () => {
-    getSocket().emit('rematch_invite', { roomId });
+    getSocket().emit(Events.REMATCH_INVITE, { roomId });
   };
 
   const handleAcceptRematch = () => {
-    getSocket().emit('rematch_response', { roomId, accept: true });
+    getSocket().emit(Events.REMATCH_RESPONSE, { roomId, accept: true });
   };
 
   const handleDeclineRematch = () => {
-    getSocket().emit('rematch_response', { roomId, accept: false });
+    getSocket().emit(Events.REMATCH_RESPONSE, { roomId, accept: false });
   };
 
   const handleRematchStart = (topic: string, questions: GeneratedQuestion[]) =>
     new Promise<void>((resolve, reject) => {
       const socket = getSocket();
       const timeoutId = setTimeout(() => {
-        socket.off('duel_started', onDuelStarted);
-        socket.off('error_message', onError);
+        socket.off(Events.DUEL_STARTED, onDuelStarted);
+        socket.off(Events.ERROR_MESSAGE, onError);
         reject(new Error('Timeout memulai duel. Coba lagi.'));
-      }, 10000);
+      }, SERVER_ACK_TIMEOUT_MS);
       const onDuelStarted = () => {
         clearTimeout(timeoutId);
-        socket.off('duel_started', onDuelStarted);
-        socket.off('error_message', onError);
+        socket.off(Events.DUEL_STARTED, onDuelStarted);
+        socket.off(Events.ERROR_MESSAGE, onError);
         resolve();
       };
       const onError = (data: { message: string }) => {
         clearTimeout(timeoutId);
-        socket.off('duel_started', onDuelStarted);
-        socket.off('error_message', onError);
+        socket.off(Events.DUEL_STARTED, onDuelStarted);
+        socket.off(Events.ERROR_MESSAGE, onError);
         reject(new Error(data.message || 'Gagal memulai duel'));
       };
-      socket.once('duel_started', onDuelStarted);
-      socket.once('error_message', onError);
-      socket.emit('rematch_start', {
+      socket.once(Events.DUEL_STARTED, onDuelStarted);
+      socket.once(Events.ERROR_MESSAGE, onError);
+      socket.emit(Events.REMATCH_START, {
         roomId,
         topic,
         questions,
@@ -407,38 +346,69 @@ export function useGameSocket(): UseGameSocketReturn {
 
   const handleGoHome = () => { disconnectSocket(); router.push('/'); };
 
-  useEffect(() => {
-    if (!rematchInvite || rematchInvite.inviterId !== playerId) return;
-    const id = setInterval(() => {
-      const remaining = Math.max(0, rematchInvite.expiresAt - Date.now());
-      setInviteRemainingMs(remaining);
-    }, 100);
-    return () => clearInterval(id);
-  }, [rematchInvite, playerId]);
+  // ── Derived selectors. Cheap to compute on every render; no need for
+  // memoization unless they show up as a perf hot-spot. Keep them inline
+  // so screens read them as named fields. ──
+  const myScore = state.scores[state.playerId] || 0;
+  const opponent = state.players.find(p => p.id !== state.playerId);
+  const opponentScore = opponent ? (state.scores[opponent.id] || 0) : 0;
 
-  const myScore       = scores[playerId] || 0;
-  const opponent      = players.find(p => p.id !== playerId);
-  const opponentScore = opponent ? (scores[opponent.id] || 0) : 0;
-
-  const timerBgClass =
-    timerColor === 'urgent' ? 'bg-urgent'
-    : timerColor === 'warn' ? 'bg-accent-pink'
-    : 'bg-accent-violet';
+  // The timer is keyed on (qIndex, timerOffset) so it resets when the
+  // server says "new question". Paused while not playing or while
+  // showing reveal feedback.
+  const timerKey = `${state.qIndex}-${state.timerOffset}`;
+  const { width: timerWidth, bgClass: timerBgClass } = useTimer(
+    QUESTION_TIME_LIMIT_MS,
+    timerKey,
+    state.timerOffset,
+    state.showAnswerFeedback || state.status !== 'playing',
+  );
 
   return {
-    playerId, playerName, isHost, players, roomData, status,
-    countdown, currentQuestion, qIndex, totalQuestions,
-    selectedAnswer, answerState, correctAnswer, scores,
-    timerWidth, timerColor, showAnswerFeedback,
-    myScore, opponent, opponentScore, timerBgClass,
-    result,
-    rematchInvite, inviteRemainingMs, myRematchLocked,
-    lastInviteRole, lastTopic, lastQuestionCount,
-    toasts, pushToast,
+    playerId: state.playerId,
+    playerName: state.playerName,
+    isHost: state.isHost,
+    players: state.players,
+    roomData: state.room,
+    status: state.status,
+
+    countdown: state.countdown,
+    currentQuestion: state.currentQuestion,
+    qIndex: state.qIndex,
+    totalQuestions: state.totalQuestions,
+    selectedAnswer: state.selectedAnswer,
+    answerState: state.answerState,
+    correctAnswer: state.correctAnswer,
+    scores: state.scores,
+    timerWidth,
+    showAnswerFeedback: state.showAnswerFeedback,
+    myScore,
+    opponent,
+    opponentScore,
+    timerBgClass,
+
+    result: state.result,
+
+    rematchInvite: state.rematchInvite,
+    inviteRemainingMs: state.inviteRemainingMs,
+    myRematchLocked: state.myRematchLocked,
+    lastInviteRole: state.lastInviteRole,
+    lastTopic: state.lastTopic,
+    lastQuestionCount: state.lastQuestionCount,
+
+    toasts,
+    pushToast,
     confettiCanvasRef,
-    handleStartDuel, handleAnswer, handleCopyCode,
-    handleRematch, handleAcceptRematch, handleDeclineRematch,
-    handleRematchStart, handleGoHome,
+
+    handleStartDuel,
+    handleAnswer,
+    handleCopyCode,
+    handleRematch,
+    handleAcceptRematch,
+    handleDeclineRematch,
+    handleRematchStart,
+    handleGoHome,
+
     copied,
   };
 }

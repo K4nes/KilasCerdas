@@ -1,45 +1,30 @@
-import type { Player, RoomStatus, RematchInvite } from './types';
+/**
+ * Socket.io event payload types — the TS view of `socket-events.js`.
+ *
+ * Runtime event names (the `Events` const) live in `socket-events.js` so
+ * that `server.js` (CommonJS) and the TS client share one wire
+ * vocabulary. This file re-exports `Events` and adds the payload type
+ * definitions used everywhere on the client.
+ */
 
-export const Events = {
+import type { Player, RoomStatus, RematchInvite, Question } from './types';
 
-  /* ── Client → Server ── */
-  CREATE_ROOM:           'create_room',
-  JOIN_ROOM:             'join_room',
-  RESYNC:                'resync',
-  START_DUEL:            'start_duel',
-  REMATCH_INVITE:        'rematch_invite',
-  REMATCH_RESPONSE:      'rematch_response',
-  REMATCH_START:         'rematch_start',
-  SUBMIT_ANSWER:         'submit_answer',
-
-  /* ── Server → Client ── */
-  ROOM_CREATED:          'room_created',
-  JOINED:                'joined',
-  PLAYER_JOINED:         'player_joined',
-  PLAYER_LEFT:           'player_left',
-  PLAYER_DISCONNECTED:   'player_disconnected',
-  PLAYER_RECONNECTED:    'player_reconnected',
-  ERROR_MESSAGE:         'error_message',
-  DUEL_STARTED:          'duel_started',
-  COUNTDOWN:             'countdown',
-  NEW_QUESTION:          'new_question',
-  ANSWER_RESULT:         'answer_result',
-  SCORE_UPDATE:          'score_update',
-  DUEL_END:              'duel_end',
-  REMATCH_INVITE_RECEIVED: 'rematch_invite_received',
-  REMATCH_RESOLVED:      'rematch_resolved',
-  ROOM_STATE_CHANGED:    'room_state_changed',
-} as const;
+// Re-export the runtime const so callers only need to import from one place.
+// The wire vocabulary lives in `socket-event-names.js` (CommonJS) so that
+// server.js can require() it; this TS file adds the payload-shape types and
+// re-exports the const for client callers.
+import { Events as EventsRuntime } from './socket-event-names';
+export { EventsRuntime as Events };
 
 export interface ClientToServerPayloads {
-  [Events.CREATE_ROOM]:      { topic: string; questionCount: number; questions: any[]; playerName: string };
-  [Events.JOIN_ROOM]:        { roomId: string; playerName: string; playerId: string };
-  [Events.RESYNC]:           { roomId: string; playerId: string };
-  [Events.START_DUEL]:       { roomId: string };
-  [Events.REMATCH_INVITE]:   { roomId: string };
-  [Events.REMATCH_RESPONSE]: { roomId: string; accept: boolean };
-  [Events.REMATCH_START]:    { roomId: string; topic: string; questions: any[]; questionCount: number };
-  [Events.SUBMIT_ANSWER]:    { roomId: string; answer: number; playerId: string };
+  [EventsRuntime.CREATE_ROOM]:      { topic: string; questionCount: number; questions: Question[]; playerName: string };
+  [EventsRuntime.JOIN_ROOM]:        { roomId: string; playerName: string; playerId: string };
+  [EventsRuntime.RESYNC]:           { roomId: string; playerId: string };
+  [EventsRuntime.START_DUEL]:       { roomId: string };
+  [EventsRuntime.REMATCH_INVITE]:   { roomId: string };
+  [EventsRuntime.REMATCH_RESPONSE]: { roomId: string; accept: boolean };
+  [EventsRuntime.REMATCH_START]:    { roomId: string; topic: string; questions: Question[]; questionCount: number };
+  [EventsRuntime.SUBMIT_ANSWER]:    { roomId: string; answer: number; playerId: string };
 }
 
 export interface JoinedPayload {
@@ -113,6 +98,7 @@ export interface NewQuestionPayload {
   options: string[];
   timeLimit: number;
   totalQuestions: number;
+  elapsedMs?: number;
 }
 
 export interface CountdownPayload {
@@ -132,20 +118,20 @@ export interface PlayerIdPayload {
 }
 
 export interface ServerToClientPayloads {
-  [Events.ROOM_CREATED]:          RoomCreatedPayload;
-  [Events.JOINED]:                JoinedPayload;
-  [Events.PLAYER_JOINED]:         PlayersPayload;
-  [Events.PLAYER_LEFT]:           PlayerIdPayload;
-  [Events.PLAYER_DISCONNECTED]:   PlayerIdPayload;
-  [Events.PLAYER_RECONNECTED]:    PlayersPayload;
-  [Events.ERROR_MESSAGE]:         ErrorPayload;
-  [Events.DUEL_STARTED]:          Record<string, never>;
-  [Events.COUNTDOWN]:             CountdownPayload;
-  [Events.NEW_QUESTION]:          NewQuestionPayload;
-  [Events.ANSWER_RESULT]:         AnswerResultPayload;
-  [Events.SCORE_UPDATE]:          ScoreUpdatePayload;
-  [Events.DUEL_END]:              DuelEndPayload;
-  [Events.REMATCH_INVITE_RECEIVED]: RematchInviteReceived;
-  [Events.REMATCH_RESOLVED]:      RematchResolved;
-  [Events.ROOM_STATE_CHANGED]:    RoomStateChanged;
+  [EventsRuntime.ROOM_CREATED]:           RoomCreatedPayload;
+  [EventsRuntime.JOINED]:                 JoinedPayload;
+  [EventsRuntime.PLAYER_JOINED]:          PlayersPayload;
+  [EventsRuntime.PLAYER_LEFT]:            PlayerIdPayload;
+  [EventsRuntime.PLAYER_DISCONNECTED]:    PlayerIdPayload;
+  [EventsRuntime.PLAYER_RECONNECTED]:     PlayersPayload;
+  [EventsRuntime.ERROR_MESSAGE]:          ErrorPayload;
+  [EventsRuntime.DUEL_STARTED]:           Record<string, never>;
+  [EventsRuntime.COUNTDOWN]:              CountdownPayload;
+  [EventsRuntime.NEW_QUESTION]:           NewQuestionPayload;
+  [EventsRuntime.ANSWER_RESULT]:          AnswerResultPayload;
+  [EventsRuntime.SCORE_UPDATE]:           ScoreUpdatePayload;
+  [EventsRuntime.DUEL_END]:               DuelEndPayload;
+  [EventsRuntime.REMATCH_INVITE_RECEIVED]: RematchInviteReceived;
+  [EventsRuntime.REMATCH_RESOLVED]:       RematchResolved;
+  [EventsRuntime.ROOM_STATE_CHANGED]:     RoomStateChanged;
 }

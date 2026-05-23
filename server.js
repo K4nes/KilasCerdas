@@ -2,6 +2,13 @@ const { createServer } = require('http');
 const next = require('next');
 const { Server } = require('socket.io');
 const { GameEngine } = require('./src/lib/game-engine');
+const { GameLoop } = require('./src/lib/game-loop');
+const {
+  REMATCH_INVITE_EXPIRY_MS,
+  ROOM_CLEANUP_MS,
+  RECONNECT_GRACE_MS,
+} = require('./src/lib/game-config');
+const { Events } = require('./src/lib/socket-event-names');
 
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = '0.0.0.0';
@@ -9,8 +16,6 @@ const port = parseInt(process.env.PORT || '3000', 10);
 
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
-
-const QUESTION_TIME_LIMIT_MS = 10000;
 
 // ─── App ───────────────────────────────────────────────────────
 app.prepare().then(() => {
@@ -26,6 +31,13 @@ app.prepare().then(() => {
   });
 
   const engine = new GameEngine();
+  const gameLoop = new GameLoop(engine, {
+    broadcast: (roomId, event, payload) => io.to(roomId).emit(event, payload),
+    unicast: (socketId, event, payload) => {
+      const sock = io.sockets.sockets.get(socketId);
+      if (sock) sock.emit(event, payload);
+    },
+  });
 
   // ─── Socket.io Events ────────────────────────────────────────
   io.on('connection', (socket) => {
@@ -33,7 +45,7 @@ app.prepare().then(() => {
     let currentRoomId = '';
 
     // 🔹 CREATE ROOM
-    socket.on('create_room', ({ topic, questionCount, questions, playerName }) => {
+    socket.on(Events.CREATE_ROOM, ({ topic, questionCount, questions, playerName }) => {
       const roomId = engine.generateRoomCode();
       const pid = engine.generatePlayerId();
       currentPlayerId = pid;
@@ -43,18 +55,18 @@ app.prepare().then(() => {
       engine.addPlayer(roomId, { id: pid, name: playerName || 'Host', socketId: socket.id });
 
       socket.join(roomId);
-      socket.emit('room_created', engine.buildRoomCreatedPayload(roomId, pid));
+      socket.emit(Events.ROOM_CREATED, engine.buildRoomCreatedPayload(roomId, pid));
 
-      // 30-min auto-cleanup
-      engine.startCleanupTimer(roomId, 30 * 60 * 1000, (id) => engine.deleteRoom(id));
+      // Auto-cleanup window for finished/abandoned rooms.
+      engine.startCleanupTimer(roomId, ROOM_CLEANUP_MS, (id) => engine.deleteRoom(id));
     });
 
     // 🔹 JOIN ROOM
-    socket.on('join_room', ({ roomId: rawRoomId, playerName, playerId: existingPlayerId }) => {
+    socket.on(Events.JOIN_ROOM, ({ roomId: rawRoomId, playerName, playerId: existingPlayerId }) => {
       const roomId = String(rawRoomId || '').toUpperCase();
       const room = engine.getRoom(roomId);
       if (!room) {
-        socket.emit('error_message', { message: 'Room tidak ditemukan' });
+        socket.emit(Events.ERROR_MESSAGE, { message: 'Room tidak ditemukan' });
         return;
       }
 
@@ -67,22 +79,22 @@ app.prepare().then(() => {
         currentRoomId = roomId;
         engine.reconnectPlayer(roomId, pid, socket.id);
         socket.join(roomId);
-        socket.emit('joined', engine.buildJoinedPayload(roomId, pid));
+        socket.emit(Events.JOINED, engine.buildJoinedPayload(roomId, pid));
 
         // Re-emit current question if duel is active
         const qPayload = engine.getCurrentQuestionPayload(roomId);
-        if (qPayload) socket.emit('new_question', qPayload);
+        if (qPayload) socket.emit(Events.NEW_QUESTION, qPayload);
 
-        io.to(roomId).emit('player_reconnected', { players: room.players });
+        io.to(roomId).emit(Events.PLAYER_RECONNECTED, { players: room.players });
         return;
       }
 
       if (room.players.length >= 2) {
-        socket.emit('error_message', { message: 'Room sudah penuh' });
+        socket.emit(Events.ERROR_MESSAGE, { message: 'Room sudah penuh' });
         return;
       }
       if (room.status !== 'waiting') {
-        socket.emit('error_message', { message: 'Duel sudah dimulai' });
+        socket.emit(Events.ERROR_MESSAGE, { message: 'Duel sudah dimulai' });
         return;
       }
 
@@ -91,15 +103,15 @@ app.prepare().then(() => {
 
       engine.addPlayer(roomId, { id: pid, name: playerName || 'Anonymous', socketId: socket.id });
       socket.join(roomId);
-      socket.emit('joined', engine.buildJoinedPayload(roomId, pid));
-      io.to(roomId).emit('player_joined', { players: room.players });
+      socket.emit(Events.JOINED, engine.buildJoinedPayload(roomId, pid));
+      io.to(roomId).emit(Events.PLAYER_JOINED, { players: room.players });
     });
 
     // 🔹 RESYNC (when page reloads)
-    socket.on('resync', ({ roomId, playerId }) => {
+    socket.on(Events.RESYNC, ({ roomId, playerId }) => {
       const room = engine.getRoom(roomId);
       if (!room) {
-        socket.emit('error_message', { message: 'Room tidak ditemukan' });
+        socket.emit(Events.ERROR_MESSAGE, { message: 'Room tidak ditemukan' });
         return;
       }
       currentPlayerId = playerId;
@@ -107,34 +119,34 @@ app.prepare().then(() => {
 
       engine.reconnectPlayer(roomId, playerId, socket.id);
       socket.join(roomId);
-      socket.emit('joined', engine.buildJoinedPayload(roomId, playerId));
+      socket.emit(Events.JOINED, engine.buildJoinedPayload(roomId, playerId));
 
       const qPayload = engine.getCurrentQuestionPayload(roomId);
-      if (qPayload) socket.emit('new_question', qPayload);
+      if (qPayload) socket.emit(Events.NEW_QUESTION, qPayload);
 
-      io.to(roomId).emit('player_reconnected', { players: room.players });
+      io.to(roomId).emit(Events.PLAYER_RECONNECTED, { players: room.players });
     });
 
     // 🔹 START DUEL
-    socket.on('start_duel', ({ roomId }) => {
+    socket.on(Events.START_DUEL, ({ roomId }) => {
       const room = engine.getRoom(roomId);
       if (!room || room.hostId !== currentPlayerId) return;
       if (room.players.length !== 2) return;
       if (room.status !== 'waiting') return;
 
       engine.startDuel(roomId);
-      io.to(roomId).emit('duel_started', {});
-      startCountdownAndPlay(roomId);
+      io.to(roomId).emit(Events.DUEL_STARTED, {});
+      gameLoop.startCountdown(roomId);
     });
 
     // 🔹 REMATCH INVITE
-    socket.on('rematch_invite', ({ roomId }) => {
+    socket.on(Events.REMATCH_INVITE, ({ roomId }) => {
       const room = engine.getRoom(roomId);
-      if (!room) { socket.emit('error_message', { message: 'Room tidak ditemukan' }); return; }
-      if (room.status !== 'finished') { socket.emit('error_message', { message: 'Rematch hanya bisa dari layar hasil' }); return; }
+      if (!room) { socket.emit(Events.ERROR_MESSAGE, { message: 'Room tidak ditemukan' }); return; }
+      if (room.status !== 'finished') { socket.emit(Events.ERROR_MESSAGE, { message: 'Rematch hanya bisa dari layar hasil' }); return; }
 
-      const invite = engine.createRematchInvite(roomId, currentPlayerId, 10000, (id) => {
-        io.to(id).emit('rematch_resolved', {
+      const invite = engine.createRematchInvite(roomId, currentPlayerId, REMATCH_INVITE_EXPIRY_MS, (id) => {
+        io.to(id).emit(Events.REMATCH_RESOLVED, {
           accepted: false,
           declinerId: null,
           reason: 'timeout',
@@ -143,15 +155,15 @@ app.prepare().then(() => {
 
       if (!invite) {
         if (room.rematchInvite) {
-          socket.emit('error_message', { message: 'Sudah ada ajakan pending' });
+          socket.emit(Events.ERROR_MESSAGE, { message: 'Sudah ada ajakan pending' });
         } else {
-          socket.emit('error_message', { message: 'Rematch sudah ditolak' });
+          socket.emit(Events.ERROR_MESSAGE, { message: 'Rematch sudah ditolak' });
         }
         return;
       }
 
       const inviter = room.players.find(p => p.id === currentPlayerId);
-      io.to(roomId).emit('rematch_invite_received', {
+      io.to(roomId).emit(Events.REMATCH_INVITE_RECEIVED, {
         inviterId: currentPlayerId,
         inviterName: inviter ? inviter.name : 'Lawan',
         expiresAt: invite.expiresAt,
@@ -159,55 +171,55 @@ app.prepare().then(() => {
     });
 
     // 🔹 REMATCH RESPONSE
-    socket.on('rematch_response', ({ roomId, accept }) => {
+    socket.on(Events.REMATCH_RESPONSE, ({ roomId, accept }) => {
       const room = engine.getRoom(roomId);
-      if (!room) { socket.emit('error_message', { message: 'Room tidak ditemukan' }); return; }
+      if (!room) { socket.emit(Events.ERROR_MESSAGE, { message: 'Room tidak ditemukan' }); return; }
 
       const result = engine.respondToRematch(roomId, currentPlayerId, accept);
       if (!result) {
-        if (!room.rematchInvite) socket.emit('error_message', { message: 'Tidak ada ajakan rematch aktif' });
-        else socket.emit('error_message', { message: 'Pengirim tidak boleh merespons sendiri' });
+        if (!room.rematchInvite) socket.emit(Events.ERROR_MESSAGE, { message: 'Tidak ada ajakan rematch aktif' });
+        else socket.emit(Events.ERROR_MESSAGE, { message: 'Pengirim tidak boleh merespons sendiri' });
         return;
       }
 
       if (result.accepted) {
-        io.to(roomId).emit('rematch_resolved', result);
-        io.to(roomId).emit('room_state_changed', {
+        io.to(roomId).emit(Events.REMATCH_RESOLVED, result);
+        io.to(roomId).emit(Events.ROOM_STATE_CHANGED, {
           status: 'topic_select',
           hostId: room.hostId,
           lastTopic: room.topic,
           lastQuestionCount: room.questionCount,
         });
       } else {
-        io.to(roomId).emit('rematch_resolved', result);
+        io.to(roomId).emit(Events.REMATCH_RESOLVED, result);
       }
     });
 
     // 🔹 REMATCH START
-    socket.on('rematch_start', ({ roomId, topic, questions, questionCount }) => {
+    socket.on(Events.REMATCH_START, ({ roomId, topic, questions, questionCount }) => {
       const room = engine.getRoom(roomId);
-      if (!room) { socket.emit('error_message', { message: 'Room tidak ditemukan' }); return; }
-      if (room.status !== 'topic_select') { socket.emit('error_message', { message: 'Room tidak dalam pemilihan topik' }); return; }
-      if (room.hostId !== currentPlayerId) { socket.emit('error_message', { message: 'Hanya host yang bisa memulai duel' }); return; }
-      if (!Array.isArray(questions) || questions.length === 0) { socket.emit('error_message', { message: 'Soal tidak valid' }); return; }
-      if (room.players.length !== 2 || !room.players.every(p => p.connected)) { socket.emit('error_message', { message: 'Kedua pemain harus terhubung' }); return; }
+      if (!room) { socket.emit(Events.ERROR_MESSAGE, { message: 'Room tidak ditemukan' }); return; }
+      if (room.status !== 'topic_select') { socket.emit(Events.ERROR_MESSAGE, { message: 'Room tidak dalam pemilihan topik' }); return; }
+      if (room.hostId !== currentPlayerId) { socket.emit(Events.ERROR_MESSAGE, { message: 'Hanya host yang bisa memulai duel' }); return; }
+      if (!Array.isArray(questions) || questions.length === 0) { socket.emit(Events.ERROR_MESSAGE, { message: 'Soal tidak valid' }); return; }
+      if (room.players.length !== 2 || !room.players.every(p => p.connected)) { socket.emit(Events.ERROR_MESSAGE, { message: 'Kedua pemain harus terhubung' }); return; }
 
       engine.startRematch(roomId, topic, questions, questionCount);
 
-      // Fresh 30-min cleanup window for each rematch
-      engine.startCleanupTimer(roomId, 30 * 60 * 1000, (id) => engine.deleteRoom(id));
+      // Fresh cleanup window for each rematch
+      engine.startCleanupTimer(roomId, ROOM_CLEANUP_MS, (id) => engine.deleteRoom(id));
 
-      io.to(roomId).emit('duel_started', {});
-      startCountdownAndPlay(roomId);
+      io.to(roomId).emit(Events.DUEL_STARTED, {});
+      gameLoop.startCountdown(roomId);
     });
 
     // 🔹 SUBMIT ANSWER
-    socket.on('submit_answer', ({ roomId, answer, playerId }) => {
+    socket.on(Events.SUBMIT_ANSWER, ({ roomId, answer, playerId }) => {
       const pid = playerId || currentPlayerId;
       const result = engine.submitAnswer(roomId, pid, answer);
       if (!result) return;
 
-      checkBothAnswers(roomId);
+      gameLoop.handleAnswer(roomId);
     });
 
     // 🔹 DISCONNECT
@@ -225,7 +237,7 @@ app.prepare().then(() => {
           ? 'inviter_disconnected'
           : 'opponent_disconnected';
         engine.cancelRematchInvite(currentRoomId);
-        io.to(currentRoomId).emit('rematch_resolved', {
+        io.to(currentRoomId).emit(Events.REMATCH_RESOLVED, {
           accepted: false,
           declinerId: null,
           reason,
@@ -236,13 +248,13 @@ app.prepare().then(() => {
         engine.removePlayer(currentRoomId, currentPlayerId);
         const updatedRoom = engine.getRoom(currentRoomId);
         if (updatedRoom) {
-          io.to(currentRoomId).emit('player_left', { playerId: currentPlayerId });
+          io.to(currentRoomId).emit(Events.PLAYER_LEFT, { playerId: currentPlayerId });
         }
       } else {
         engine.markDisconnected(currentRoomId, currentPlayerId);
-        io.to(currentRoomId).emit('player_disconnected', { playerId: currentPlayerId });
+        io.to(currentRoomId).emit(Events.PLAYER_DISCONNECTED, { playerId: currentPlayerId });
 
-        // 60s reconnect window
+        // Reconnect grace window
         setTimeout(() => {
           const r = engine.getRoom(currentRoomId);
           if (!r) return;
@@ -252,7 +264,7 @@ app.prepare().then(() => {
           if (r.status === 'topic_select') {
             const wasHost = r.hostId === currentPlayerId;
             const message = wasHost ? 'Host meninggalkan room' : 'Lawan keluar room';
-            io.to(currentRoomId).emit('error_message', { message });
+            io.to(currentRoomId).emit(Events.ERROR_MESSAGE, { message });
             engine.deleteRoom(currentRoomId);
             return;
           }
@@ -260,118 +272,14 @@ app.prepare().then(() => {
           engine.removePlayer(currentRoomId, currentPlayerId);
           const updatedRoom = engine.getRoom(currentRoomId);
           if (updatedRoom) {
-            io.to(currentRoomId).emit('player_left', { playerId: currentPlayerId });
+            io.to(currentRoomId).emit(Events.PLAYER_LEFT, { playerId: currentPlayerId });
           } else {
             engine.deleteRoom(currentRoomId);
           }
-        }, 60000);
+        }, RECONNECT_GRACE_MS);
       }
     });
   });
-
-  // ─── Helpers ─────────────────────────────────────────────────
-  function startCountdownAndPlay(roomId) {
-    let count = 3;
-    const ci = setInterval(() => {
-      io.to(roomId).emit('countdown', { count });
-      count--;
-      if (count < 0) {
-        clearInterval(ci);
-        beginQuestion(roomId);
-      }
-    }, 1000);
-  }
-
-  let questionTimer = null;
-
-  function beginQuestion(roomId) {
-    const room = engine.getRoom(roomId);
-    if (!room) return;
-
-    engine.beginQuestion(roomId);
-
-    const qPayload = engine.getCurrentQuestionPayload(roomId);
-    if (qPayload) io.to(roomId).emit('new_question', qPayload);
-
-    questionTimer = setTimeout(() => forceTimeout(roomId), QUESTION_TIME_LIMIT_MS);
-  }
-
-  function forceTimeout(roomId) {
-    const room = engine.getRoom(roomId);
-    if (!room || room.status !== 'playing') return;
-
-    const unanswered = engine.getUnansweredPlayerIds(roomId);
-    for (const pid of unanswered) {
-      engine.submitAnswer(roomId, pid, null);
-    }
-    revealAnswersAndAdvance(roomId);
-  }
-
-  function revealAnswersAndAdvance(roomId) {
-    const room = engine.getRoom(roomId);
-    if (!room) return;
-
-    const question = room.questions[room.currentQuestion];
-
-    // Send answer_result to each player
-    for (const player of room.players) {
-      const answerIndex = room.answers[player.id];
-      const isCorrect = answerIndex === question.correctIndex;
-      const socketInstance = io.sockets.sockets.get(player.socketId);
-      if (socketInstance) {
-        socketInstance.emit('answer_result', {
-          correct: isCorrect,
-          correctAnswer: question.correctIndex,
-          scores: { ...room.scores },
-        });
-      }
-    }
-
-    // Emit score update to the room
-    io.to(roomId).emit('score_update', { scores: { ...room.scores } });
-
-    // Wait 2 seconds (so both can see the feedback), then advance the question
-    setTimeout(() => {
-      advanceOrEnd(roomId);
-    }, 2000);
-  }
-
-  function checkBothAnswers(roomId) {
-    if (!engine.areAllAnswered(roomId)) return;
-    clearTimeout(questionTimer);
-    revealAnswersAndAdvance(roomId);
-  }
-
-  function advanceOrEnd(roomId) {
-    const result = engine.advanceQuestion(roomId);
-    if (!result) return;
-
-    if (result.isOver) {
-      // 1.5s delay before showing results
-      setTimeout(() => {
-        const room = engine.getRoom(roomId);
-        if (!room) return;
-        io.to(roomId).emit('duel_end', {
-          winner: result.winner,
-          scores: result.scores,
-          stats: result.stats,
-          topic: result.topic,
-        });
-      }, 1500);
-    } else {
-      // 2s delay before next question
-      setTimeout(() => {
-        const room = engine.getRoom(roomId);
-        if (!room) return;
-        engine.beginQuestion(roomId);
-
-        const qPayload = engine.getCurrentQuestionPayload(roomId);
-        if (qPayload) io.to(roomId).emit('new_question', qPayload);
-
-        questionTimer = setTimeout(() => forceTimeout(roomId), QUESTION_TIME_LIMIT_MS);
-      }, 2000);
-    }
-  }
 
   // ─── Start ───────────────────────────────────────────────────
   httpServer.listen(port, hostname, () => {

@@ -19,7 +19,7 @@ export default function RoomPage() {
     // Duel
     currentQuestion, qIndex, totalQuestions,
     selectedAnswer, answerState, correctAnswer, scores,
-    timerWidth, timerColor, timerBgClass, showAnswerFeedback,
+    timerWidth, timerBgClass, showAnswerFeedback,
     myScore, opponent, opponentScore,
     // Result
     result,
@@ -50,7 +50,6 @@ export default function RoomPage() {
         result={result}
         playerId={playerId}
         playerName={playerName}
-        players={players}
         opponent={opponent}
         myScore={myScore}
         opponentScore={opponentScore}

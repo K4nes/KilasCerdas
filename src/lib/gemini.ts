@@ -1,12 +1,21 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import type { Question } from "./room-manager";
+import type { Question } from "./types";
 import { getFallbackQuestions } from "./utils";
+import {
+  GeminiRateLimitError,
+  extractRetryDelaySec,
+  isRateLimitError,
+} from "./gemini-error";
+
+// Re-export so the API route can `import { GeminiRateLimitError } from
+// '@/lib/gemini'` without knowing about the parser module split.
+export { GeminiRateLimitError } from "./gemini-error";
 
 const API_KEY = process.env.GEMINI_API_KEY || "";
 
 const genAI = API_KEY ? new GoogleGenerativeAI(API_KEY) : null;
 
-function parseJSONFromMarkdown(text: string): any {
+function parseJSONFromMarkdown(text: string): unknown {
   try {
     return JSON.parse(text);
   } catch {
@@ -67,7 +76,7 @@ Aturan:
     const parsed = parseJSONFromMarkdown(text);
 
     if (parsed && Array.isArray(parsed) && parsed.length > 0) {
-      const questions = parsed.map((q: any, i: number) => ({
+      const questions = parsed.map((q: { question?: string; options?: string[]; correctIndex?: number }, i: number) => ({
         question: q.question || `Question ${i + 1}`,
         options: Array.isArray(q.options)
           ? q.options
@@ -79,6 +88,15 @@ Aturan:
 
     throw new Error("Invalid response format from Gemini");
   } catch (error) {
+    // Surface rate-limit errors as a typed exception so the route layer can
+    // return a structured 429 to the client. All other failures fall back to
+    // the canned question set.
+    if (isRateLimitError(error)) {
+      const details = (error as { errorDetails?: unknown }).errorDetails;
+      const retryAfterSec = extractRetryDelaySec(details);
+      console.warn(`Gemini rate limit hit, retry in ${retryAfterSec}s`);
+      throw new GeminiRateLimitError(retryAfterSec);
+    }
     console.error("Gemini API error:", error);
     return getFallbackQuestions(topic, count);
   }

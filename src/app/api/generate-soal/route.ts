@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { generateQuestions } from '@/lib/gemini';
+import { generateQuestions, GeminiRateLimitError } from '@/lib/gemini';
 import { getFallbackQuestions } from '@/lib/utils';
 
 export async function POST(req: NextRequest) {
@@ -12,6 +12,20 @@ export async function POST(req: NextRequest) {
     try {
       questions = await generateQuestions(topic, count);
     } catch (err) {
+      // Rate limits get a structured 429 so the client can show a dedicated
+      // modal. Everything else falls back to the canned question set.
+      if (err instanceof GeminiRateLimitError) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: 'rate_limit',
+            retryAfterSec: err.retryAfterSec,
+            message:
+              'Kuota generate soal harian sudah habis. Coba lagi sebentar.',
+          },
+          { status: 429 },
+        );
+      }
       console.error('Gemini generation failed, using fallback:', err);
       questions = getFallbackQuestions(topic, count);
     }

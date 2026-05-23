@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Sparkles, Zap, Loader2, ArrowRight } from 'lucide-react';
+import RateLimitModal from '@/components/rate-limit-modal';
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -57,6 +58,7 @@ export default function TopicPicker({
   const [questionCount, setQuestionCount] = useState(initialQuestionCount);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState('');
+  const [rateLimitSec, setRateLimitSec] = useState<number | null>(null);
 
   const handleGenerate = async () => {
     if (!topic.trim()) {
@@ -73,6 +75,14 @@ export default function TopicPicker({
         body: JSON.stringify({ topic: topic.trim(), questionCount }),
       });
       const data = await res.json();
+
+      // Server returns 429 with { error: 'rate_limit', retryAfterSec } when
+      // the Gemini free-tier quota is exhausted.
+      if (res.status === 429 && data?.error === 'rate_limit') {
+        setRateLimitSec(typeof data.retryAfterSec === 'number' ? data.retryAfterSec : 60);
+        setIsGenerating(false);
+        return;
+      }
 
       if (!data.success || !data.questions?.length) {
         setError('Gagal generate soal. Coba lagi.');
@@ -100,6 +110,17 @@ export default function TopicPicker({
 
   return (
     <>
+      {rateLimitSec !== null && (
+        <RateLimitModal
+          retryAfterSec={rateLimitSec}
+          onClose={() => setRateLimitSec(null)}
+          onRetry={() => {
+            setRateLimitSec(null);
+            handleGenerate();
+          }}
+        />
+      )}
+
       {/* ── Form ── */}
       <div className="space-y-7 animate-slide-up">
 
@@ -129,10 +150,11 @@ export default function TopicPicker({
                   key={label}
                   onClick={() => { setTopic(label); setError(''); }}
                   disabled={isGenerating}
-                  className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-all border-2
+                  aria-pressed={active}
+                  className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-all ${card} text-ink
                     ${active
-                      ? 'bg-white border-accent-violet text-accent-violet shadow-sm'
-                      : `${card} text-ink hover:-translate-y-0.5 hover:shadow-sm border-transparent`
+                      ? 'border-[3px] border-ink shadow-sm -translate-y-0.5 ring-2 ring-offset-2 ring-offset-paper ring-ink'
+                      : 'border-2 border-transparent hover:-translate-y-0.5 hover:shadow-sm'
                     }`}
                 >
                   {label}

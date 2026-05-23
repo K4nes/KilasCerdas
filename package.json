@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "node server.js",
     "build": "next build",
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --experimental-strip-types --test --test-reporter=spec 'src/lib/*.test.js' 'src/lib/*.test.ts'"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",

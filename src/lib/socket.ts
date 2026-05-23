@@ -6,7 +6,6 @@ let socket: Socket | null = null;
 
 export function getSocket(): Socket {
   if (!socket || !socket.connected) {
-    const port = window.location.port;
     socket = io(window.location.origin, {
       transports: ['websocket', 'polling'],
     });

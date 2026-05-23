@@ -10,6 +10,9 @@
  *   const { GameEngine } = require('./src/lib/game-engine');
  *   const engine = new GameEngine();
  */
+const { resolveWinner } = require('./resolve-winner');
+const { QUESTION_TIME_LIMIT_MS } = require('./game-config');
+
 class GameEngine {
   constructor() {
     /** @type {Map<string, Room>} */
@@ -209,8 +212,8 @@ class GameEngine {
 
     const question = room.questions[room.currentQuestion];
     const isCorrect = answerIndex === question.correctIndex;
-    const timeTaken = room.timerStartedAt ? Date.now() - room.timerStartedAt : 10000;
-    const score = this.calculateScore(isCorrect, timeTaken, 10000);
+    const timeTaken = room.timerStartedAt ? Date.now() - room.timerStartedAt : QUESTION_TIME_LIMIT_MS;
+    const score = this.calculateScore(isCorrect, timeTaken, QUESTION_TIME_LIMIT_MS);
 
     if (isCorrect) {
       room.scores[playerId] = (room.scores[playerId] || 0) + score;
@@ -259,22 +262,11 @@ class GameEngine {
       room.status = 'finished';
       room.finishedAt = Date.now();
 
-      let winnerId = null;
-      let maxScore = -1;
-      for (const [pid, sc] of Object.entries(room.scores)) {
-        if (sc > maxScore) { maxScore = sc; winnerId = pid; }
-      }
-
-      const winner = room.players.find(p => p.id === winnerId) || null;
-      const stats = room.players.map(p => ({
-        name: p.name,
-        score: room.scores[p.id] || 0,
-        isWinner: p.id === winnerId,
-      }));
+      const { winner, stats } = resolveWinner(room.scores, room.players);
 
       return {
         isOver: true,
-        winner: winner ? { name: winner.name, id: winner.id } : null,
+        winner,
         scores: { ...room.scores },
         stats,
         topic: room.topic,
@@ -294,19 +286,7 @@ class GameEngine {
     const room = this.rooms.get(roomId);
     if (!room) return { winner: null, scores: {}, stats: [] };
 
-    let maxScore = -1;
-    let winnerId = null;
-    for (const [pid, score] of Object.entries(room.scores)) {
-      if (score > maxScore) { maxScore = score; winnerId = pid; }
-    }
-
-    const winner = room.players.find(p => p.id === winnerId) || null;
-    const stats = room.players.map(p => ({
-      name: p.name,
-      score: room.scores[p.id] || 0,
-      isWinner: p.id === winnerId,
-    }));
-
+    const { winner, stats } = resolveWinner(room.scores, room.players);
     return { winner, scores: { ...room.scores }, stats };
   }
 

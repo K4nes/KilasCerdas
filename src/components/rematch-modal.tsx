@@ -46,6 +46,12 @@ export default function RematchModal({
   const progressPct = Math.max(0, Math.min(100, (remainingMs / TOTAL_MS) * 100));
   const expired = remainingMs <= 0;
 
+  // Match the duel-screen timer urgency pattern: safe → warn → urgent.
+  const barClass =
+    progressPct < 30 ? 'bg-urgent' :
+    progressPct < 60 ? 'bg-accent-pink' :
+    'bg-accent-violet';
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-paper/85 backdrop-blur-sm px-4 animate-fade-in"
@@ -54,8 +60,8 @@ export default function RematchModal({
       aria-labelledby="rematch-modal-title"
     >
       <div className="card max-w-sm w-full text-center animate-scale-in">
-        <div className="w-16 h-16 mx-auto rounded-2xl bg-accent-gradient flex items-center justify-center mb-4 shadow-glow">
-          <Zap className="w-7 h-7 text-white" strokeWidth={2.5} />
+        <div className="w-16 h-16 mx-auto rounded-2xl bg-accent-pink border-[3px] border-ink shadow-sm flex items-center justify-center mb-4">
+          <Zap className="w-7 h-7 text-ink" strokeWidth={2.5} />
         </div>
 
         <h2
@@ -74,13 +80,13 @@ export default function RematchModal({
 
         {/* Countdown progress bar — animates 100% → 0% over 10s. */}
         <div className="mb-5 space-y-1.5">
-          <div className="h-2 rounded-full bg-paper-2 overflow-hidden">
+          <div className="h-2.5 rounded-full bg-paper-2 border-[2px] border-ink overflow-hidden">
             <div
-              className="h-full bg-accent-gradient transition-[width] duration-100 ease-linear"
+              className={`h-full ${barClass} transition-[width,background-color] duration-100 ease-linear`}
               style={{ width: `${progressPct}%` }}
             />
           </div>
-          <p className="text-[11px] font-semibold text-muted tabular-nums">
+          <p className="text-[11px] font-black text-ink tabular-nums tracking-wider uppercase">
             {expired ? 'Waktu habis…' : `Sisa ${remainingSec}s`}
           </p>
         </div>
