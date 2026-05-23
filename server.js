@@ -20,6 +20,7 @@ const handle = app.getRequestHandler();
 // ─── App ───────────────────────────────────────────────────────
 app.prepare().then(() => {
   const httpServer = createServer((req, res) => {
+    if (req.url && req.url.startsWith('/socket.io')) return;
     handle(req, res);
   });
 
