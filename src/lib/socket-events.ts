@@ -17,7 +17,7 @@ import { Events as EventsRuntime } from './socket-event-names';
 export { EventsRuntime as Events };
 
 export interface ClientToServerPayloads {
-  [EventsRuntime.CREATE_ROOM]:      { topic: string; questionCount: number; questions: Question[]; playerName: string };
+  [EventsRuntime.CREATE_ROOM]:      { topic: string; questionCount: number; questions: Question[]; playerName: string; chatId?: string };
   [EventsRuntime.JOIN_ROOM]:        { roomId: string; playerName: string; playerId: string };
   [EventsRuntime.RESYNC]:           { roomId: string; playerId: string };
   [EventsRuntime.START_DUEL]:       { roomId: string };
@@ -38,6 +38,7 @@ export interface JoinedPayload {
     status: RoomStatus;
     currentQuestion: number;
     hostId: string;
+    chatId?: string;
   };
   scores: Record<string, number>;
   rematchInvite: RematchInvite | null;

@@ -114,7 +114,7 @@ export interface UseGameSocketReturn {
   handleRematch: () => void;
   handleAcceptRematch: () => void;
   handleDeclineRematch: () => void;
-  handleRematchStart: (topic: string, questions: GeneratedQuestion[]) => Promise<void>;
+  handleRematchStart: (topic: string, questions: GeneratedQuestion[], chatId?: string) => Promise<void>;
   handleGoHome: () => void;
 
   copied: boolean;
@@ -314,7 +314,7 @@ export function useGameSocket(): UseGameSocketReturn {
     getSocket().emit(Events.REMATCH_RESPONSE, { roomId, accept: false });
   };
 
-  const handleRematchStart = (topic: string, questions: GeneratedQuestion[]) =>
+  const handleRematchStart = (topic: string, questions: GeneratedQuestion[], _chatId?: string) =>
     new Promise<void>((resolve, reject) => {
       const socket = getSocket();
       const timeoutId = setTimeout(() => {

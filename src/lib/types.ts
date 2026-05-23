@@ -38,4 +38,5 @@ export interface Room {
   rematchInvite: RematchInvite | null;
   lastInviterId: string | null;
   cleanupTimerHandle?: ReturnType<typeof setTimeout>;
+  chatId?: string;
 }

@@ -27,6 +27,7 @@ export default function TopicSelectScreen({
 }: Props) {
   const fallbackTopic = lastTopic || roomData?.topic || 'Umum';
   const fallbackQuestionCount = lastQuestionCount || roomData?.questionCount || 5;
+  const chatId = roomData?.chatId;
 
   return (
     <RoomShell toasts={toasts}>
@@ -97,6 +98,7 @@ export default function TopicSelectScreen({
                 submitLabel="Mulai Duel"
                 initialTopic={fallbackTopic}
                 initialQuestionCount={fallbackQuestionCount}
+                chatId={chatId}
                 onSubmit={onRematchStart}
               />
             </div>

@@ -70,7 +70,8 @@ export default function RematchModal({
         >
           <span className="text-accent-violet">
             {inviterName}
-          </span>{' '}
+          </span>
+          <br />
           mengajak tantang lagi
         </h2>
 

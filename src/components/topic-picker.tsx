@@ -17,6 +17,8 @@ type Props = {
   initialQuestionCount?: number;
   /** Label for the submit CTA, e.g. "Generate Soal & Buat Room" or "Mulai Duel". */
   submitLabel: string;
+  /** Optional chat session ID to continue a Gemini chat (for rematch dedup). */
+  chatId?: string;
   /**
    * Called after `/api/generate-soal` responds successfully. Parent decides what
    * to do with the generated questions (emit `create_room`, `rematch_start`, …).
@@ -26,7 +28,7 @@ type Props = {
    * async hand-off (socket round-trip, etc.). If it rejects with an Error, the
    * error message is shown inline and loading is cleared.
    */
-  onSubmit: (topic: string, questions: GeneratedQuestion[]) => void | Promise<void>;
+  onSubmit: (topic: string, questions: GeneratedQuestion[], chatId?: string) => void | Promise<void>;
 };
 
 // ─── Constants ────────────────────────────────────────────────
@@ -52,6 +54,7 @@ export default function TopicPicker({
   initialTopic = '',
   initialQuestionCount = 5,
   submitLabel,
+  chatId,
   onSubmit,
 }: Props) {
   const [topic, setTopic] = useState(initialTopic);
@@ -69,15 +72,16 @@ export default function TopicPicker({
     setIsGenerating(true);
 
     try {
+      const body: Record<string, unknown> = { topic: topic.trim(), questionCount };
+      if (chatId) body.chatId = chatId;
+
       const res = await fetch('/api/generate-soal', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic: topic.trim(), questionCount }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
 
-      // Server returns 429 with { error: 'rate_limit', retryAfterSec } when
-      // the Gemini free-tier quota is exhausted.
       if (res.status === 429 && data?.error === 'rate_limit') {
         setRateLimitSec(typeof data.retryAfterSec === 'number' ? data.retryAfterSec : 60);
         setIsGenerating(false);
@@ -85,20 +89,15 @@ export default function TopicPicker({
       }
 
       if (!data.success || !data.questions?.length) {
-        setError('Gagal generate soal. Coba lagi.');
+        const msg = typeof data.message === 'string' ? data.message : 'Gagal generate soal. Coba lagi.';
+        setError(msg);
         setIsGenerating(false);
         return;
       }
 
-      // Hand off. Await regardless — if parent returns void this resolves
-      // immediately; if parent returns a Promise we keep the loading state
-      // until it settles so end-to-end UX stays cohesive.
-      //
-      // Note: we intentionally do NOT clear `isGenerating` on the success
-      // path. The parent is expected to navigate away or take over the
-      // loading UX. If the parent wants to surface an error and clear
-      // loading, it should reject with an Error.
-      await onSubmit(topic.trim(), data.questions as GeneratedQuestion[]);
+      const effectiveChatId: string | undefined = typeof data.chatId === 'string' ? data.chatId : undefined;
+
+      await onSubmit(topic.trim(), data.questions as GeneratedQuestion[], effectiveChatId);
     } catch (err) {
       const msg = err instanceof Error && err.message
         ? err.message
@@ -210,7 +209,7 @@ export default function TopicPicker({
             Gemini AI sedang berpikir…
           </h3>
           <p className="text-muted text-sm mb-5">
-            Membuat <strong>{questionCount}</strong> soal tentang <strong>“{topic}”</strong>
+            Membuat <strong>{questionCount}</strong> soal tentang <strong>"{topic}"</strong>
           </p>
           <div className="flex justify-center gap-1.5 pt-3">
             {[0, 1, 2].map((i) => (

@@ -57,6 +57,7 @@ export interface RoomData {
   status: RoomStatus;
   currentQuestion?: number;
   hostId?: string;
+  chatId?: string;
 }
 
 export type AnswerState = 'pending' | 'correct' | 'wrong' | 'timeout';

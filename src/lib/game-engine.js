@@ -39,8 +39,8 @@ class GameEngine {
 
   // ─── Room lifecycle ──────────────────────────────────────────
 
-  /** @param {string} id @param {string} topic @param {number} questionCount @param {Array} questions @param {string} hostId @returns {Room} */
-  createRoom(id, topic, questionCount, questions, hostId) {
+  /** @param {string} id @param {string} topic @param {number} questionCount @param {Array} questions @param {string} hostId @param {string} [chatId] @returns {Room} */
+  createRoom(id, topic, questionCount, questions, hostId, chatId) {
     const room = {
       id,
       topic: topic || 'Umum',
@@ -58,6 +58,7 @@ class GameEngine {
       rematchInvite: null,
       lastInviterId: null,
       cleanupTimerHandle: null,
+      chatId: chatId || null,
     };
     this.rooms.set(id, room);
     return room;
@@ -423,6 +424,7 @@ class GameEngine {
         status: room.status,
         currentQuestion: room.currentQuestion,
         hostId: room.hostId,
+        chatId: room.chatId || undefined,
       },
       scores: { ...room.scores },
       rematchInvite,
@@ -451,6 +453,7 @@ class GameEngine {
         questionCount: room.questionCount,
         status: room.status,
         hostId: playerId,
+        chatId: room.chatId || undefined,
       },
     };
   }

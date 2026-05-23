@@ -30,7 +30,7 @@ export default function CreatePage() {
     }
   }, []);
 
-  const handleSubmit = (topic: string, questions: GeneratedQuestion[]) =>
+  const handleSubmit = (topic: string, questions: GeneratedQuestion[], chatId?: string) =>
     new Promise<void>((resolve, reject) => {
       const socket = getSocket();
 
@@ -54,6 +54,7 @@ export default function CreatePage() {
         questionCount: questions.length,
         questions,
         playerName,
+        chatId,
       });
     });
 

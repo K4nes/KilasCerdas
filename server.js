@@ -45,13 +45,13 @@ app.prepare().then(() => {
     let currentRoomId = '';
 
     // 🔹 CREATE ROOM
-    socket.on(Events.CREATE_ROOM, ({ topic, questionCount, questions, playerName }) => {
+    socket.on(Events.CREATE_ROOM, ({ topic, questionCount, questions, playerName, chatId }) => {
       const roomId = engine.generateRoomCode();
       const pid = engine.generatePlayerId();
       currentPlayerId = pid;
       currentRoomId = roomId;
 
-      engine.createRoom(roomId, topic, questionCount, questions, pid);
+      engine.createRoom(roomId, topic, questionCount, questions, pid, chatId);
       engine.addPlayer(roomId, { id: pid, name: playerName || 'Host', socketId: socket.id });
 
       socket.join(roomId);
