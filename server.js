@@ -19,10 +19,7 @@ const handle = app.getRequestHandler();
 
 // ─── App ───────────────────────────────────────────────────────
 app.prepare().then(() => {
-  const httpServer = createServer((req, res) => {
-    if (req.url && req.url.startsWith('/socket.io')) return;
-    handle(req, res);
-  });
+  const httpServer = createServer();
 
   const io = new Server(httpServer, {
     cors: {
@@ -42,6 +39,11 @@ app.prepare().then(() => {
       const sock = io.sockets.sockets.get(socketId);
       if (sock) sock.emit(event, payload);
     },
+  });
+
+  httpServer.on('request', (req, res) => {
+    if (req.url && req.url.startsWith('/socket.io')) return;
+    handle(req, res);
   });
 
   // ─── Socket.io Events ────────────────────────────────────────
