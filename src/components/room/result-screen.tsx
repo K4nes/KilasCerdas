@@ -55,6 +55,28 @@ export default function ResultScreen({
   const isWinner = !isDraw && result.winner?.id === playerId;
   const opponentOffline = opponent ? opponent.connected === false : false;
 
+  // ── Win/lose SFX (one-shot) ──
+  // Plays once when the result screen mounts. Skipped only on draw.
+  // Independent of the background-music toggle — that overlay controls
+  // ONLY the looping backsound, not result SFX.
+  useEffect(() => {
+    if (isDraw) return;
+    if (typeof window === 'undefined') return;
+
+    const src = isWinner ? '/sounds/confetti.mp3' : '/sounds/losing-horn.mp3';
+    const sfx = new Audio(src);
+    sfx.volume = isWinner ? 0.55 : 0.5;
+    sfx.play().catch(() => {
+      // Autoplay rejected — silent fallback. Result screen is reached after
+      // user interaction (answering questions), so this is an edge case.
+    });
+
+    return () => {
+      sfx.pause();
+      sfx.src = '';
+    };
+  }, [isDraw, isWinner]);
+
   const rematchButtonState:
     | 'idle'
     | 'inviting'
@@ -119,14 +141,14 @@ export default function ResultScreen({
           <div className="grid grid-cols-2 gap-4 items-stretch relative">
             <div className={`card border-3 border-ink !p-5 flex flex-col justify-between items-center text-center
               ${isDraw ? 'bg-card-blue text-on-blue' : isWinner ? 'bg-card-purple text-on-purple' : 'bg-card-pink text-on-pink'}`}>
-              <p className="text-xs font-black uppercase tracking-wider opacity-70">Kamu</p>
+              <p className="text-xs font-black uppercase tracking-wider">Kamu</p>
               <p className="font-display text-lg font-black truncate max-w-full my-1">{playerName || 'Kamu'}</p>
               <p className="font-display text-3xl font-black tabular-nums">{myScore}</p>
             </div>
 
             <div className={`card border-3 border-ink !p-5 flex flex-col justify-between items-center text-center
               ${isDraw ? 'bg-card-blue text-on-blue' : !isWinner ? 'bg-card-purple text-on-purple' : 'bg-card-pink text-on-pink'}`}>
-              <p className="text-xs font-black uppercase tracking-wider opacity-70">Lawan</p>
+              <p className="text-xs font-black uppercase tracking-wider">Lawan</p>
               <p className="font-display text-lg font-black truncate max-w-full my-1">{opponent?.name || 'Anonymous'}</p>
               <p className="font-display text-3xl font-black tabular-nums">{opponentScore}</p>
             </div>

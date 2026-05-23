@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
+import MusicToggle from '@/components/music-toggle';
 
 export const metadata: Metadata = {
   title: 'Kilas Cerdas — Duel Pengetahuan Real-Time',
@@ -22,6 +23,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="id" suppressHydrationWarning>
       <body className="font-body antialiased text-ink" suppressHydrationWarning>
         {children}
+        <MusicToggle />
       </body>
     </html>
   );
